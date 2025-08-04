@@ -1159,7 +1159,7 @@ core::JoinType toJoinType(protocol::JoinType type) {
     case protocol::JoinType::FULL:
       return core::JoinType::kFull;
     case protocol::JoinType::SOURCE_OUTER:
-      return core::JoinType::kInner; // TODO: Map to proper join type.
+      return core::JoinType::kLeft;
   }
 
   VELOX_UNSUPPORTED("Unknown join type");
@@ -1757,6 +1757,7 @@ VeloxQueryPlanConverterBase::toVeloxQueryPlan(
 
   return std::make_shared<core::TopNRowNumberNode>(
       node->id,
+      core::TopNRowNumberNode::RankFunction::kRowNumber,
       partitionFields,
       sortFields,
       sortOrders,

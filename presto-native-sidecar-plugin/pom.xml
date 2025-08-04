@@ -5,7 +5,7 @@
     <parent>
         <groupId>com.facebook.presto</groupId>
         <artifactId>presto-root</artifactId>
-        <version>0.294-SNAPSHOT</version>
+        <version>0.295-SNAPSHOT</version>
     </parent>
 
     <artifactId>presto-native-sidecar-plugin</artifactId>
@@ -159,7 +159,7 @@
             <artifactId>presto-tests</artifactId>
             <scope>test</scope>
             <type>test-jar</type>
-            <version>0.294-SNAPSHOT</version>
+            <version>0.295-SNAPSHOT</version>
         </dependency>
 
         <dependency>
@@ -173,7 +173,7 @@
             <artifactId>presto-native-execution</artifactId>
             <scope>test</scope>
             <type>test-jar</type>
-            <version>0.294-SNAPSHOT</version>
+            <version>0.295-SNAPSHOT</version>
         </dependency>
 
         <dependency>
@@ -230,6 +230,25 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+
+    <profiles>
+        <profile>
+            <id>skip-native-sidecar-tests</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <excludes>
+                                <exclude>**/TestNativeSidecar*.java</exclude>
+                            </excludes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 
     <build>
         <plugins>

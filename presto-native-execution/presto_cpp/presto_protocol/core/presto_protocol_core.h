@@ -344,13 +344,6 @@ struct ConnectorInsertTableHandle : public JsonEncodedSubclass {};
 void to_json(json& j, const std::shared_ptr<ConnectorInsertTableHandle>& p);
 void from_json(const json& j, std::shared_ptr<ConnectorInsertTableHandle>& p);
 } // namespace facebook::presto::protocol
-namespace facebook::presto::protocol {
-struct ConnectorMetadataUpdateHandle : public JsonEncodedSubclass {};
-void to_json(json& j, const std::shared_ptr<ConnectorMetadataUpdateHandle>& p);
-void from_json(
-    const json& j,
-    std::shared_ptr<ConnectorMetadataUpdateHandle>& p);
-} // namespace facebook::presto::protocol
 
 namespace facebook::presto::protocol {
 struct SourceLocation {
@@ -1373,6 +1366,7 @@ struct IndexJoinNode : public PlanNode {
   std::shared_ptr<std::shared_ptr<RowExpression>> filter = {};
   std::shared_ptr<VariableReferenceExpression> probeHashVariable = {};
   std::shared_ptr<VariableReferenceExpression> indexHashVariable = {};
+  List<VariableReferenceExpression> lookupVariables = {};
 
   IndexJoinNode() noexcept;
 };
@@ -1716,14 +1710,6 @@ void to_json(json& j, const MergeJoinNode& p);
 void from_json(const json& j, MergeJoinNode& p);
 } // namespace facebook::presto::protocol
 namespace facebook::presto::protocol {
-struct MetadataUpdates {
-  ConnectorId connectorId = {};
-  List<std::shared_ptr<ConnectorMetadataUpdateHandle>> metadataUpdates = {};
-};
-void to_json(json& j, const MetadataUpdates& p);
-void from_json(const json& j, MetadataUpdates& p);
-} // namespace facebook::presto::protocol
-namespace facebook::presto::protocol {
 struct NodeVersion {
   String version = {};
 };
@@ -2011,6 +1997,18 @@ struct RemoteTransactionHandle : public ConnectorTransactionHandle {
 };
 void to_json(json& j, const RemoteTransactionHandle& p);
 void from_json(const json& j, RemoteTransactionHandle& p);
+} // namespace facebook::presto::protocol
+namespace facebook::presto::protocol {
+struct RestFunctionHandle : public FunctionHandle {
+  SqlFunctionId functionId = {};
+  String version = {};
+  Signature signature = {};
+  std::shared_ptr<URI> executionEndpoint = {};
+
+  RestFunctionHandle() noexcept;
+};
+void to_json(json& j, const RestFunctionHandle& p);
+void from_json(const json& j, RestFunctionHandle& p);
 } // namespace facebook::presto::protocol
 namespace facebook::presto::protocol {
 struct RowNumberNode : public PlanNode {
@@ -2390,7 +2388,6 @@ struct TaskInfo {
   List<PlanNodeId> noMoreSplits = {};
   TaskStats stats = {};
   bool needsPlan = {};
-  MetadataUpdates metadataUpdates = {};
   String nodeId = {};
 };
 void to_json(json& j, const TaskInfo& p);

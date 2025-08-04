@@ -65,6 +65,8 @@ import static com.facebook.presto.spi.security.AccessDeniedException.denyRenameV
 import static com.facebook.presto.spi.security.AccessDeniedException.denyRevokeTablePrivilege;
 import static com.facebook.presto.spi.security.AccessDeniedException.denySelectTable;
 import static com.facebook.presto.spi.security.AccessDeniedException.denySetTableProperties;
+import static com.facebook.presto.spi.security.AccessDeniedException.denyShowColumnsMetadata;
+import static com.facebook.presto.spi.security.AccessDeniedException.denyShowCreateTable;
 import static com.facebook.presto.spi.security.AccessDeniedException.denyTruncateTable;
 import static com.facebook.presto.spi.security.AccessDeniedException.denyUpdateTableColumns;
 
@@ -117,6 +119,14 @@ public class FileBasedAccessControl
     }
 
     @Override
+    public void checkCanShowCreateTable(ConnectorTransactionHandle transactionHandle, ConnectorIdentity identity, AccessControlContext context, SchemaTableName tableName)
+    {
+        if (!checkTablePermission(identity, tableName, SELECT)) {
+            denyShowCreateTable(tableName.toString());
+        }
+    }
+
+    @Override
     public void checkCanCreateTable(ConnectorTransactionHandle transaction, ConnectorIdentity identity, AccessControlContext context, SchemaTableName tableName)
     {
         if (!isDatabaseOwner(identity, tableName.getSchemaName())) {
@@ -149,6 +159,24 @@ public class FileBasedAccessControl
     public Set<SchemaTableName> filterTables(ConnectorTransactionHandle transactionHandle, ConnectorIdentity identity, AccessControlContext context, Set<SchemaTableName> tableNames)
     {
         return tableNames;
+    }
+
+    @Override
+    public void checkCanShowColumnsMetadata(ConnectorTransactionHandle transactionHandle, ConnectorIdentity identity, AccessControlContext context, SchemaTableName tableName)
+    {
+        if (!checkTablePermission(identity, tableName, SELECT)) {
+            denyShowColumnsMetadata(tableName.toString());
+        }
+    }
+
+    @Override
+    public List<ColumnMetadata> filterColumns(ConnectorTransactionHandle transactionHandle, ConnectorIdentity identity, AccessControlContext context, SchemaTableName tableName, List<ColumnMetadata> columns)
+    {
+        if (!checkTablePermission(identity, tableName, SELECT)) {
+            return ImmutableList.of();
+        }
+
+        return columns;
     }
 
     @Override

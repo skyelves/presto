@@ -73,7 +73,7 @@ public class PrestoSparkNativeQueryRunnerUtils
 
     private PrestoSparkNativeQueryRunnerUtils() {}
 
-    public static Map<String, String> getNativeExecutionSessionConfigs()
+    public static Map<String, String> getNativeExecutionSparkConfigs()
     {
         ImmutableMap.Builder<String, String> builder = new ImmutableMap.Builder<String, String>()
                 // Do not use default Prestissimo config files. Presto-Spark will generate the configs on-the-fly.
@@ -114,7 +114,7 @@ public class PrestoSparkNativeQueryRunnerUtils
         return createRunner(
                 defaultCatalog,
                 Optional.of(getBaseDataPath()),
-                getNativeExecutionSessionConfigs(),
+                getNativeExecutionSparkConfigs(),
                 getNativeExecutionShuffleConfigs(),
                 ImmutableList.of(nativeExecutionModule));
     }
@@ -165,6 +165,16 @@ public class PrestoSparkNativeQueryRunnerUtils
         logging.setLevel("com.facebook.presto.spark", WARN);
     }
 
+    public static synchronized Path getBaseDataPath()
+    {
+        if (dataDirectory.isPresent()) {
+            return dataDirectory.get();
+        }
+
+        dataDirectory = Optional.of(getNativeQueryRunnerParameters().dataDirectory);
+        return dataDirectory.get();
+    }
+
     private static Database createDatabaseMetastoreObject(String name)
     {
         return Database.builder()
@@ -180,15 +190,5 @@ public class PrestoSparkNativeQueryRunnerUtils
         sparkConfigs.put(SPARK_SHUFFLE_MANAGER, "com.facebook.presto.spark.classloader_interface.PrestoSparkNativeExecutionShuffleManager");
         sparkConfigs.put(FALLBACK_SPARK_SHUFFLE_MANAGER, "org.apache.spark.shuffle.sort.SortShuffleManager");
         return sparkConfigs.build();
-    }
-
-    public static synchronized Path getBaseDataPath()
-    {
-        if (dataDirectory.isPresent()) {
-            return dataDirectory.get();
-        }
-
-        dataDirectory = Optional.of(getNativeQueryRunnerParameters().dataDirectory);
-        return dataDirectory.get();
     }
 }
