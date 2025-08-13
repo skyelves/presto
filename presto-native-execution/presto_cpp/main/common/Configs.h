@@ -202,6 +202,8 @@ class SystemConfig : public ConfigBase {
       "http-server.https.port"};
   static constexpr std::string_view kHttpServerHttpsEnabled{
       "http-server.https.enabled"};
+  static constexpr std::string_view kHttpServerHttp2Enabled{
+      "http-server.http2.enabled"};
   /// List of comma separated ciphers the client can use.
   ///
   /// NOTE: the client needs to have at least one cipher shared with server
@@ -750,6 +752,7 @@ class SystemConfig : public ConfigBase {
       "aggregation-spill-enabled"};
   static constexpr std::string_view kOrderBySpillEnabled{
       "order-by-spill-enabled"};
+  static constexpr std::string_view kMaxSpillBytes{"max-spill-bytes"};
 
   // Max wait time for exchange request in seconds.
   static constexpr std::string_view kRequestDataSizesMaxWaitSec{
@@ -762,6 +765,11 @@ class SystemConfig : public ConfigBase {
 
   static constexpr std::string_view kMaxLocalExchangePartitionBufferSize{
       "local-exchange.max-partition-buffer-size"};
+
+  // Add to temporarily help with gradual rollout for text writer
+  // TODO: remove once text writer is fully rolled out
+  static constexpr std::string_view kTextWriterEnabled{
+    "text-writer-enabled"};
 
   SystemConfig();
 
@@ -778,6 +786,8 @@ class SystemConfig : public ConfigBase {
   bool httpServerHttpsEnabled() const;
 
   int httpServerHttpsPort() const;
+
+  bool httpServerHttp2Enabled() const;
 
   /// A list of ciphers (comma separated) that are supported by
   /// server and client. Note Java and folly::SSLContext use different names to
@@ -1038,6 +1048,8 @@ class SystemConfig : public ConfigBase {
 
   bool orderBySpillEnabled() const;
 
+  uint64_t maxSpillBytes() const;
+
   int requestDataSizesMaxWaitSec() const;
 
   std::string pluginDir() const;
@@ -1047,6 +1059,8 @@ class SystemConfig : public ConfigBase {
   int32_t httpSrvIoEvbViolationThresholdMs() const;
 
   uint64_t maxLocalExchangePartitionBufferSize() const;
+
+  bool textWriterEnabled() const;
 };
 
 /// Provides access to node properties defined in node.properties file.

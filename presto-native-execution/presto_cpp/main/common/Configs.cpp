@@ -157,6 +157,7 @@ SystemConfig::SystemConfig() {
           NUM_PROP(kHttpServerNumCpuThreadsHwMultiplier, 1.0),
           NONE_PROP(kHttpServerHttpsPort),
           BOOL_PROP(kHttpServerHttpsEnabled, false),
+          BOOL_PROP(kHttpServerHttp2Enabled, true),
           STR_PROP(
               kHttpsSupportedCiphers,
               "ECDHE-ECDSA-AES256-GCM-SHA384,AES256-GCM-SHA384"),
@@ -260,11 +261,13 @@ SystemConfig::SystemConfig() {
           BOOL_PROP(kJoinSpillEnabled, true),
           BOOL_PROP(kAggregationSpillEnabled, true),
           BOOL_PROP(kOrderBySpillEnabled, true),
+          NUM_PROP(kMaxSpillBytes, 100UL << 30), // 100GB
           NUM_PROP(kRequestDataSizesMaxWaitSec, 10),
           STR_PROP(kPluginDir, ""),
           NUM_PROP(kExchangeIoEvbViolationThresholdMs, 1000),
           NUM_PROP(kHttpSrvIoEvbViolationThresholdMs, 1000),
           NUM_PROP(kMaxLocalExchangePartitionBufferSize, 65536),
+        BOOL_PROP(kTextWriterEnabled, false),
       };
 }
 
@@ -293,6 +296,10 @@ int SystemConfig::httpServerHttpsPort() const {
 
 bool SystemConfig::httpServerHttpsEnabled() const {
   return optionalProperty<bool>(kHttpServerHttpsEnabled).value();
+}
+
+bool SystemConfig::httpServerHttp2Enabled() const {
+  return optionalProperty<bool>(kHttpServerHttp2Enabled).value();
 }
 
 std::string SystemConfig::httpsSupportedCiphers() const {
@@ -342,6 +349,10 @@ bool SystemConfig::aggregationSpillEnabled() const {
 
 bool SystemConfig::orderBySpillEnabled() const {
   return optionalProperty<bool>(kOrderBySpillEnabled).value();
+}
+
+uint64_t SystemConfig::maxSpillBytes() const {
+  return optionalProperty<uint64_t>(kMaxSpillBytes).value();
 }
 
 int SystemConfig::requestDataSizesMaxWaitSec() const {
@@ -919,6 +930,10 @@ uint64_t SystemConfig::maxLocalExchangePartitionBufferSize() const {
   return optionalProperty<uint64_t>(kMaxLocalExchangePartitionBufferSize).value();
 }
 
+bool SystemConfig::textWriterEnabled() const {
+  return optionalProperty<bool>(kTextWriterEnabled).value();
+}
+
 NodeConfig::NodeConfig() {
   registeredProps_ =
       std::unordered_map<std::string, folly::Optional<std::string>>{
@@ -1037,6 +1052,7 @@ BaseVeloxQueryConfig::BaseVeloxQueryConfig() {
               c.aggregationSpillEnabled()),
           BOOL_PROP(QueryConfig::kJoinSpillEnabled, c.joinSpillEnabled()),
           BOOL_PROP(QueryConfig::kOrderBySpillEnabled, c.orderBySpillEnabled()),
+          NUM_PROP(QueryConfig::kMaxSpillBytes, c.maxSpillBytes()),
           NUM_PROP(QueryConfig::kMaxSpillLevel, c.maxSpillLevel()),
           NUM_PROP(QueryConfig::kMaxSpillFileSize, c.maxSpillFileSize()),
           NUM_PROP(
