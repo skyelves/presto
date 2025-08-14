@@ -11,18 +11,27 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.facebook.presto.iceberg;
+package com.facebook.presto.metadata;
 
-import com.facebook.presto.spi.PrestoException;
-import com.facebook.presto.spi.SchemaTableName;
+import com.facebook.drift.annotations.ThriftEnum;
+import com.facebook.drift.annotations.ThriftEnumValue;
 
-import static com.facebook.presto.iceberg.IcebergErrorCode.ICEBERG_UNKNOWN_TABLE_TYPE;
-
-public class UnknownTableTypeException
-        extends PrestoException
+@ThriftEnum
+public enum BuiltInFunctionKind
 {
-    public UnknownTableTypeException(SchemaTableName tableName)
+    ENGINE(0),
+    PLUGIN(1);
+
+    private final int value;
+
+    BuiltInFunctionKind(int value)
     {
-        super(ICEBERG_UNKNOWN_TABLE_TYPE, "Not an Iceberg table: " + tableName);
+        this.value = value;
+    }
+
+    @ThriftEnumValue
+    public int getValue()
+    {
+        return value;
     }
 }
