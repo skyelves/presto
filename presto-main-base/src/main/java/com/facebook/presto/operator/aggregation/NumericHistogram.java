@@ -184,7 +184,7 @@ public class NumericHistogram
 
             Entry right = current.getRight();
 
-            // right is guaranteed to exist because we set the penalty of the last bucket to infinity
+            // right is guaranteed to exist because we set the penalty of the last bucket to NaN
             // so the first current in the queue can never be the last bucket
             checkState(right != null, "Expected right to be != null");
             checkState(right.isValid(), "Expected right to be valid");
