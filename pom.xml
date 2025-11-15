@@ -10,7 +10,7 @@
 
     <groupId>com.facebook.presto</groupId>
     <artifactId>presto-root</artifactId>
-    <version>0.295-SNAPSHOT</version>
+    <version>0.296-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <name>presto-root</name>
@@ -43,14 +43,14 @@
         <air.java.version>17</air.java.version>
         <air.maven.version>3.3.9</air.maven.version>
 
-        <dep.antlr.version>4.7.1</dep.antlr.version>
+        <dep.antlr.version>4.13.2</dep.antlr.version>
         <dep.airlift.version>0.221</dep.airlift.version>
         <dep.packaging.version>${dep.airlift.version}</dep.packaging.version>
         <dep.slice.version>0.38</dep.slice.version>
         <dep.testing-mysql-server-5.version>0.6</dep.testing-mysql-server-5.version>
         <dep.aws-sdk.version>1.12.782</dep.aws-sdk.version>
         <dep.okhttp.version>4.12.0</dep.okhttp.version>
-        <dep.jdbi3.version>3.4.0</dep.jdbi3.version>
+        <dep.jdbi3.version>3.49.0</dep.jdbi3.version>
         <dep.oracle.version>19.3.0.0</dep.oracle.version>
         <dep.drift.version>${dep.airlift.version}</dep.drift.version>
         <!-- Changing joda version changes tzdata which must match deployed JVM tzdata
@@ -58,18 +58,18 @@
         <dep.joda.version>2.13.1</dep.joda.version>
         <dep.tempto.version>1.55</dep.tempto.version>
         <dep.testng.version>7.5</dep.testng.version>
-        <dep.lucene.version>8.11.3</dep.lucene.version>
+        <dep.lucene.version>9.12.0</dep.lucene.version>
         <dep.assertj-core.version>3.8.0</dep.assertj-core.version>
         <dep.parquet.version>1.13.1</dep.parquet.version>
-        <dep.nexus-staging-plugin.version>1.6.8</dep.nexus-staging-plugin.version>
         <dep.asm.version>9.7.1</dep.asm.version>
         <dep.gcs.version>1.9.17</dep.gcs.version>
         <dep.alluxio.version>313</dep.alluxio.version>
         <dep.slf4j.version>2.0.16</dep.slf4j.version>
         <dep.kafka.version>3.9.1</dep.kafka.version>
-        <dep.pinot.version>0.11.0</dep.pinot.version>
+        <dep.pinot.version>1.3.0</dep.pinot.version>
         <dep.druid.version>30.0.1</dep.druid.version>
         <dep.jaxb.version>2.3.1</dep.jaxb.version>
+        <dep.jaxb.runtime.version>4.0.5</dep.jaxb.runtime.version>
         <dep.hudi.version>0.14.0</dep.hudi.version>
         <dep.testcontainers.version>1.20.5</dep.testcontainers.version>
         <dep.docker-java.version>3.4.1</dep.docker-java.version>
@@ -80,16 +80,20 @@
         <dep.jackson.version>2.15.4</dep.jackson.version>
         <dep.j2objc.version>3.0.0</dep.j2objc.version>
         <dep.avro.version>1.11.4</dep.avro.version>
-        <dep.commons.compress.version>1.26.2</dep.commons.compress.version>
+        <dep.commons.compress.version>1.27.1</dep.commons.compress.version>
         <dep.protobuf-java.version>4.29.0</dep.protobuf-java.version>
         <dep.jetty.version>12.0.18</dep.jetty.version>
-        <dep.netty.version>4.1.124.Final</dep.netty.version>
+        <dep.netty.version>4.1.128.Final</dep.netty.version>
         <dep.reactor-netty.version>1.2.8</dep.reactor-netty.version>
-        <dep.snakeyaml.version>2.0</dep.snakeyaml.version>
+        <dep.snakeyaml.version>2.5</dep.snakeyaml.version>
         <dep.gson.version>2.12.1</dep.gson.version>
         <dep.commons.lang3.version>3.18.0</dep.commons.lang3.version>
         <dep.guice.version>6.0.0</dep.guice.version>
         <dep.arrow.version>17.0.0</dep.arrow.version>
+        <dep.mariadb.version>3.5.4</dep.mariadb.version>
+        <dep.spark.version>2.0.2-6</dep.spark.version>
+        <dep.hadoop.version>3.4.1-1</dep.hadoop.version>
+        <scala.version>2.13.17</scala.version>
 
         <!--
           America/Bahia_Banderas has:
@@ -102,8 +106,17 @@
         <air.test.parallel>methods</air.test.parallel>
         <air.test.thread-count>2</air.test.thread-count>
         <air.test.jvmsize>4g</air.test.jvmsize>
-        <grpc.version>1.70.0</grpc.version>
+        <grpc.version>1.75.0</grpc.version>
         <air.javadoc.lint>-missing</air.javadoc.lint>
+        <dep.commons.codec.version>1.17.2</dep.commons.codec.version>
+        <aws.sdk.version>2.32.9</aws.sdk.version>
+        <dep.jts.version>1.19.0</dep.jts.version>
+
+        <dep.fastutil.version>8.5.2</dep.fastutil.version>
+        <dep.datasketches-memory.version>2.2.0</dep.datasketches-memory.version>
+        <dep.datasketches-java.version>5.0.1</dep.datasketches-java.version>
+
+        <release.autoPublish>true</release.autoPublish>
     </properties>
 
     <modules>
@@ -148,7 +161,9 @@
         <module>presto-client</module>
         <module>presto-parser</module>
         <module>presto-main-base</module>
+        <module>presto-main-tests</module>
         <module>presto-main</module>
+        <module>presto-built-in-worker-function-tools</module>
         <module>presto-ml</module>
         <module>presto-geospatial-toolkit</module>
         <module>presto-benchmark</module>
@@ -166,7 +181,9 @@
         <module>presto-plugin-toolkit</module>
         <module>presto-resource-group-managers</module>
         <module>presto-password-authenticators</module>
-        <module>presto-session-property-managers</module>
+        <module>presto-session-property-managers-common</module>
+        <module>presto-db-session-property-manager</module>
+        <module>presto-file-session-property-manager</module>
         <module>presto-benchto-benchmarks</module>
         <module>presto-thrift-api</module>
         <module>presto-thrift-testing-server</module>
@@ -216,10 +233,20 @@
         <module>presto-function-server</module>
         <module>presto-router-example-plugin-scheduler</module>
         <module>presto-plan-checker-router-plugin</module>
+        <module>presto-sql-helpers/presto-sql-invoked-functions-plugin</module>
+        <module>presto-sql-helpers/presto-native-sql-invoked-functions-plugin</module>
     </modules>
 
     <dependencyManagement>
         <dependencies>
+
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>${aws.sdk.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
 
             <dependency>
                 <groupId>commons-beanutils</groupId>
@@ -327,7 +354,26 @@
 
             <dependency>
                 <groupId>com.facebook.presto</groupId>
-                <artifactId>presto-session-property-managers</artifactId>
+                <artifactId>presto-session-property-managers-common</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>com.facebook.presto</groupId>
+                <artifactId>presto-session-property-managers-common</artifactId>
+                <version>${project.version}</version>
+                <type>test-jar</type>
+            </dependency>
+
+            <dependency>
+                <groupId>com.facebook.presto</groupId>
+                <artifactId>presto-db-session-property-manager</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>com.facebook.presto</groupId>
+                <artifactId>presto-file-session-property-manager</artifactId>
                 <version>${project.version}</version>
             </dependency>
 
@@ -370,7 +416,7 @@
             <dependency>
                 <groupId>commons-io</groupId>
                 <artifactId>commons-io</artifactId>
-                <version>2.16.1</version>
+                <version>2.18.0</version>
             </dependency>
 
             <dependency>
@@ -804,6 +850,18 @@
 
             <dependency>
                 <groupId>com.facebook.presto</groupId>
+                <artifactId>presto-main-tests</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>com.facebook.presto</groupId>
+                <artifactId>presto-built-in-worker-function-tools</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>com.facebook.presto</groupId>
                 <artifactId>presto-main-base</artifactId>
                 <version>${project.version}</version>
                 <type>test-jar</type>
@@ -939,6 +997,13 @@
             </dependency>
 
             <dependency>
+                <groupId>com.facebook.presto.spark</groupId>
+                <artifactId>spark-core</artifactId>
+                <version>${dep.spark.version}</version>
+                <scope>provided</scope>
+            </dependency>
+
+            <dependency>
                 <groupId>com.facebook.presto</groupId>
                 <artifactId>presto-base-arrow-flight</artifactId>
                 <version>${project.version}</version>
@@ -1010,8 +1075,8 @@
 
             <dependency>
                 <groupId>com.facebook.presto.hadoop</groupId>
-                <artifactId>hadoop-apache2</artifactId>
-                <version>2.7.4-12</version>
+                <artifactId>hadoop-apache</artifactId>
+                <version>${dep.hadoop.version}</version>
             </dependency>
 
             <dependency>
@@ -1361,7 +1426,7 @@
             <dependency>
                 <groupId>org.glassfish.jaxb</groupId>
                 <artifactId>jaxb-runtime</artifactId>
-                <version>${dep.jaxb.version}</version>
+                <version>${dep.jaxb.runtime.version}</version>
             </dependency>
 
             <dependency>
@@ -1421,13 +1486,13 @@
             <dependency>
                 <groupId>org.jetbrains</groupId>
                 <artifactId>annotations</artifactId>
-                <version>19.0.0</version>
+                <version>26.0.2</version>
             </dependency>
 
             <dependency>
                 <groupId>it.unimi.dsi</groupId>
                 <artifactId>fastutil</artifactId>
-                <version>8.5.2</version>
+                <version>${dep.fastutil.version}</version>
             </dependency>
 
             <dependency>
@@ -1482,13 +1547,13 @@
             <dependency>
                 <groupId>com.microsoft.sqlserver</groupId>
                 <artifactId>mssql-jdbc</artifactId>
-                <version>12.8.1.jre8</version>
+                <version>12.10.2.jre8</version>
             </dependency>
 
             <dependency>
                 <groupId>org.fusesource.jansi</groupId>
                 <artifactId>jansi</artifactId>
-                <version>1.18</version>
+                <version>2.4.2</version>
             </dependency>
 
             <dependency>
@@ -1841,7 +1906,7 @@
             <dependency>
                 <groupId>com.google.auth</groupId>
                 <artifactId>google-auth-library-oauth2-http</artifactId>
-                <version>0.12.0</version>
+                <version>1.39.1</version>
                 <exclusions>
                     <exclusion>
                         <groupId>commons-logging</groupId>
@@ -2005,7 +2070,7 @@
             <dependency>
                 <groupId>commons-codec</groupId>
                 <artifactId>commons-codec</artifactId>
-                <version>1.17.0</version>
+                <version>${dep.commons.codec.version}</version>
             </dependency>
 
             <dependency>
@@ -2070,6 +2135,24 @@
                 <groupId>com.facebook.airlift</groupId>
                 <artifactId>testing-postgresql-server</artifactId>
                 <version>9.6.3-4</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.apache.pinot</groupId>
+                <artifactId>pinot-spi</artifactId>
+                <version>${dep.pinot.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.apache.pinot</groupId>
+                <artifactId>pinot-common</artifactId>
+                <version>${dep.pinot.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.apache.pinot</groupId>
+                <artifactId>pinot-core</artifactId>
+                <version>${dep.pinot.version}</version>
             </dependency>
 
             <dependency>
@@ -2221,33 +2304,27 @@
             </dependency>
 
             <dependency>
-                <groupId>org.apache.pinot</groupId>
-                <artifactId>presto-pinot-driver</artifactId>
-                <version>${dep.pinot.version}</version>
-            </dependency>
-
-            <dependency>
                 <groupId>org.xerial.snappy</groupId>
                 <artifactId>snappy-java</artifactId>
-                <version>1.1.10.4</version>
+                <version>1.1.10.7</version>
             </dependency>
 
             <dependency>
                 <groupId>com.github.luben</groupId>
                 <artifactId>zstd-jni</artifactId>
-                <version>1.5.2-3</version>
+                <version>1.5.7-6</version>
             </dependency>
 
             <dependency>
                 <groupId>org.roaringbitmap</groupId>
                 <artifactId>RoaringBitmap</artifactId>
-                <version>0.9.3</version>
+                <version>1.3.0</version>
             </dependency>
 
             <dependency>
                 <groupId>org.apache.zookeeper</groupId>
                 <artifactId>zookeeper</artifactId>
-                <version>3.9.3</version>
+                <version>3.9.4</version>
                 <exclusions>
                     <exclusion>
                         <artifactId>jline</artifactId>
@@ -2271,19 +2348,19 @@
             <dependency>
                 <groupId>org.checkerframework</groupId>
                 <artifactId>checker-qual</artifactId>
-                <version>3.37.0</version>
+                <version>3.52.0</version>
             </dependency>
 
             <dependency>
                 <groupId>org.jgrapht</groupId>
                 <artifactId>jgrapht-core</artifactId>
-                <version>1.3.1</version>
+                <version>1.5.2</version>
             </dependency>
 
             <dependency>
                 <groupId>redis.clients</groupId>
                 <artifactId>jedis</artifactId>
-                <version>3.8.0</version>
+                <version>7.0.0</version>
             </dependency>
 
             <dependency>
@@ -2404,7 +2481,7 @@
 
             <dependency>
                 <groupId>org.apache.lucene</groupId>
-                <artifactId>lucene-analyzers-common</artifactId>
+                <artifactId>lucene-analysis-common</artifactId>
                 <version>${dep.lucene.version}</version>
             </dependency>
 
@@ -2417,13 +2494,13 @@
             <dependency>
                 <groupId>org.locationtech.jts</groupId>
                 <artifactId>jts-core</artifactId>
-                <version>1.19.0</version>
+                <version>${dep.jts.version}</version>
             </dependency>
 
             <dependency>
                 <groupId>org.locationtech.jts.io</groupId>
                 <artifactId>jts-io-common</artifactId>
-                <version>1.19.0</version>
+                <version>${dep.jts.version}</version>
                 <exclusions>
                     <exclusion>
                         <groupId>junit</groupId>
@@ -2435,7 +2512,7 @@
             <dependency>
                 <groupId>org.anarres.lzo</groupId>
                 <artifactId>lzo-hadoop</artifactId>
-                <version>1.0.5</version>
+                <version>1.0.6</version>
                 <exclusions>
                     <exclusion>
                         <groupId>org.apache.hadoop</groupId>
@@ -2486,20 +2563,13 @@
             <dependency>
                 <groupId>net.jodah</groupId>
                 <artifactId>failsafe</artifactId>
-                <version>2.0.1</version>
-            </dependency>
-
-            <dependency>
-                <groupId>com.facebook.presto.spark</groupId>
-                <artifactId>spark-core</artifactId>
-                <version>2.0.2-6</version>
-                <scope>provided</scope>
+                <version>2.4.4</version>
             </dependency>
 
             <dependency>
                 <groupId>com.clearspring.analytics</groupId>
                 <artifactId>stream</artifactId>
-                <version>2.9.5</version>
+                <version>2.9.8</version>
             </dependency>
 
             <dependency>
@@ -2559,13 +2629,13 @@
             <dependency>
                 <groupId>org.apache.datasketches</groupId>
                 <artifactId>datasketches-memory</artifactId>
-                <version>2.2.0</version>
+                <version>${dep.datasketches-memory.version}</version>
             </dependency>
 
             <dependency>
                 <groupId>org.apache.datasketches</groupId>
                 <artifactId>datasketches-java</artifactId>
-                <version>5.0.1</version>
+                <version>${dep.datasketches-java.version}</version>
             </dependency>
 
             <dependency>
@@ -2652,6 +2722,35 @@
                 <version>${dep.arrow.version}</version>
             </dependency>
 
+            <dependency>
+                <groupId>org.mariadb.jdbc</groupId>
+                <artifactId>mariadb-java-client</artifactId>
+                <version>${dep.mariadb.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>com.nimbusds</groupId>
+                <artifactId>nimbus-jose-jwt</artifactId>
+                <version>10.0.2</version>
+            </dependency>
+
+            <dependency>
+                <groupId>com.nimbusds</groupId>
+                <artifactId>oauth2-oidc-sdk</artifactId>
+                <version>11.0</version>
+                <exclusions>
+                    <exclusion>
+                        <groupId>org.aw2</groupId>
+                        <artifactId>asm</artifactId>
+                    </exclusion>
+                </exclusions>
+            </dependency>
+
+            <dependency>
+                <groupId>org.scala-lang</groupId>
+                <artifactId>scala-library</artifactId>
+                <version>${scala.version}</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
@@ -2759,6 +2858,7 @@
                         </ignoredClassPatterns>
                         <ignoredResourcePatterns combine.children="append">
                             <ignoredResourcePattern>git.properties</ignoredResourcePattern>
+                            <ignoredResourcePattern>mime.types</ignoredResourcePattern>
                         </ignoredResourcePatterns>
                     </configuration>
                 </plugin>
@@ -2768,18 +2868,6 @@
                     <artifactId>maven-release-plugin</artifactId>
                     <configuration>
                         <preparationGoals>clean verify -DskipTests</preparationGoals>
-                    </configuration>
-                </plugin>
-
-                <plugin>
-                    <groupId>org.sonatype.plugins</groupId>
-                    <artifactId>nexus-staging-maven-plugin</artifactId>
-                    <version>${dep.nexus-staging-plugin.version}</version>
-                    <!-- This plugin is not registered as an extension because it will fail to activate
-                         concurrently with the Maven Provisio plugin, as that has its own deployment lifecycle -->
-                    <configuration>
-                        <serverId>ossrh</serverId>
-                        <nexusUrl>https://oss.sonatype.org/</nexusUrl>
                     </configuration>
                 </plugin>
 
@@ -3001,7 +3089,7 @@
                         <extensions>true</extensions>
                         <configuration>
                             <publishingServerId>ossrh</publishingServerId>
-                            <autoPublish>true</autoPublish>
+                            <autoPublish>${release.autoPublish}</autoPublish>
                             <waitUntil>validated</waitUntil>
                         </configuration>
                     </plugin>
@@ -3118,6 +3206,150 @@
                     </plugin>
                 </plugins>
             </build>
+        </profile>
+        <profile>
+            <id>spark2</id>
+
+            <activation>
+                <activeByDefault>true</activeByDefault>
+                <property>
+                    <name>!spark-version</name>
+                </property>
+            </activation>
+
+            <properties>
+                <dep.spark.version>2.0.2-6</dep.spark.version>
+            </properties>
+
+            <modules>
+                <module>presto-spark-classloader-spark2</module>
+            </modules>
+
+            <build>
+                <pluginManagement>
+                    <plugins>
+                        <plugin>
+                            <groupId>org.apache.maven.plugins</groupId>
+                            <artifactId>maven-enforcer-plugin</artifactId>
+                            <version>3.3.0</version>
+                            <dependencies>
+                                <dependency>
+                                    <groupId>org.codehaus.mojo</groupId>
+                                    <artifactId>extra-enforcer-rules</artifactId>
+                                    <version>1.6.2</version>
+                                </dependency>
+                            </dependencies>
+                            <configuration>
+                                <skip>true</skip>
+                                <rules>
+                                    <requireUpperBoundDeps>
+                                        <excludes combine.children="append">
+                                            <!-- TODO: fix this in Airlift resolver -->
+                                            <exclude>org.codehaus.plexus:plexus-utils</exclude>
+                                            <exclude>com.google.guava:guava</exclude>
+                                            <exclude>com.fasterxml.jackson.core:jackson-annotations</exclude>
+                                            <exclude>com.fasterxml.jackson.core:jackson-core</exclude>
+                                            <exclude>com.fasterxml.jackson.core:jackson-databind</exclude>
+                                        </excludes>
+                                    </requireUpperBoundDeps>
+                                </rules>
+                            </configuration>
+                        </plugin>
+
+                        <plugin>
+                            <groupId>org.basepom.maven</groupId>
+                            <artifactId>duplicate-finder-maven-plugin</artifactId>
+                            <configuration>
+                                <skip>true</skip>
+                                <ignoredClassPatterns combine.children="append">
+                                    <ignoredClassPattern>com.github.benmanes.caffeine.*</ignoredClassPattern>
+                                    <!-- Duplicate class is being brought in by commons-io & log4j-api -->
+                                    <ignoredClassPattern>META-INF.versions.9.module-info</ignoredClassPattern>
+                                    <!-- Duplicate class is being brought in by several netty dependencies-->
+                                    <ignoredClassPattern>META-INF.versions.11.module-info</ignoredClassPattern>
+                                    <!-- Ignore duplicate classes related to lucene-core and ranger-apache -->
+                                    <ignoredClassPattern>META-INF.versions.9.org.apache.lucene.*</ignoredClassPattern>
+                                </ignoredClassPatterns>
+
+                            </configuration>
+                        </plugin>
+
+                    </plugins>
+                </pluginManagement>
+            </build>
+
+        </profile>
+        <profile>
+            <id>spark3</id>
+
+            <activation>
+                <property>
+                    <name>spark-version</name>
+                    <value>3</value>
+                </property>
+            </activation>
+
+            <properties>
+                <dep.spark.version>3.4.1-1</dep.spark.version>
+            </properties>
+
+            <modules>
+                <module>presto-spark-classloader-spark3</module>
+            </modules>
+
+            <build>
+                <pluginManagement>
+                    <plugins>
+                        <plugin>
+                            <groupId>org.apache.maven.plugins</groupId>
+                            <artifactId>maven-enforcer-plugin</artifactId>
+                            <version>3.3.0</version>
+                            <dependencies>
+                                <dependency>
+                                    <groupId>org.codehaus.mojo</groupId>
+                                    <artifactId>extra-enforcer-rules</artifactId>
+                                    <version>1.6.2</version>
+                                </dependency>
+                            </dependencies>
+                            <configuration>
+                                <skip>true</skip>
+                                <rules>
+                                    <requireUpperBoundDeps>
+                                        <excludes combine.children="append">
+                                            <!-- TODO: fix this in Airlift resolver -->
+                                            <exclude>org.codehaus.plexus:plexus-utils</exclude>
+                                            <exclude>com.google.guava:guava</exclude>
+                                            <exclude>com.fasterxml.jackson.core:jackson-annotations</exclude>
+                                            <exclude>com.fasterxml.jackson.core:jackson-core</exclude>
+                                            <exclude>com.fasterxml.jackson.core:jackson-databind</exclude>
+                                        </excludes>
+                                    </requireUpperBoundDeps>
+                                </rules>
+                            </configuration>
+                        </plugin>
+
+                        <plugin>
+                            <groupId>org.basepom.maven</groupId>
+                            <artifactId>duplicate-finder-maven-plugin</artifactId>
+                            <configuration>
+                                <skip>true</skip>
+                                <ignoredClassPatterns combine.children="append">
+                                    <ignoredClassPattern>com.github.benmanes.caffeine.*</ignoredClassPattern>
+                                    <!-- Duplicate class is being brought in by commons-io & log4j-api -->
+                                    <ignoredClassPattern>META-INF.versions.9.module-info</ignoredClassPattern>
+                                    <!-- Duplicate class is being brought in by several netty dependencies-->
+                                    <ignoredClassPattern>META-INF.versions.11.module-info</ignoredClassPattern>
+                                    <!-- Ignore duplicate classes related to lucene-core and ranger-apache -->
+                                    <ignoredClassPattern>META-INF.versions.9.org.apache.lucene.*</ignoredClassPattern>
+                                </ignoredClassPatterns>
+
+                            </configuration>
+                        </plugin>
+
+                    </plugins>
+                </pluginManagement>
+            </build>
+
         </profile>
     </profiles>
 </project>

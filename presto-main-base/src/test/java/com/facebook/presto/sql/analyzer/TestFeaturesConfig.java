@@ -38,6 +38,8 @@ import static com.facebook.airlift.configuration.testing.ConfigAssertions.assert
 import static com.facebook.airlift.units.DataSize.Unit.GIGABYTE;
 import static com.facebook.airlift.units.DataSize.Unit.KILOBYTE;
 import static com.facebook.airlift.units.DataSize.Unit.MEGABYTE;
+import static com.facebook.presto.spi.security.ViewSecurity.DEFINER;
+import static com.facebook.presto.spi.security.ViewSecurity.INVOKER;
 import static com.facebook.presto.sql.analyzer.FeaturesConfig.AggregationPartitioningMergingStrategy.LEGACY;
 import static com.facebook.presto.sql.analyzer.FeaturesConfig.AggregationPartitioningMergingStrategy.TOP_DOWN;
 import static com.facebook.presto.sql.analyzer.FeaturesConfig.JoinDistributionType.BROADCAST;
@@ -48,8 +50,6 @@ import static com.facebook.presto.sql.analyzer.FeaturesConfig.SPILLER_SPILL_PATH
 import static com.facebook.presto.sql.analyzer.FeaturesConfig.SPILL_ENABLED;
 import static com.facebook.presto.sql.analyzer.FeaturesConfig.TaskSpillingStrategy.ORDER_BY_CREATE_TIME;
 import static com.facebook.presto.sql.analyzer.FeaturesConfig.TaskSpillingStrategy.PER_TASK_MEMORY_THRESHOLD;
-import static com.facebook.presto.sql.tree.CreateView.Security.DEFINER;
-import static com.facebook.presto.sql.tree.CreateView.Security.INVOKER;
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.SECONDS;
 
@@ -85,6 +85,7 @@ public class TestFeaturesConfig
                 .setHistoryCanonicalPlanNodeLimit(1000)
                 .setHistoryBasedOptimizerTimeout(new Duration(10, SECONDS))
                 .setHistoryBasedOptimizerPlanCanonicalizationStrategies("IGNORE_SAFE_CONSTANTS")
+                .setQueryTypesEnabledForHbo("SELECT,INSERT")
                 .setLogPlansUsedInHistoryBasedOptimizer(false)
                 .setEnforceTimeoutForHBOQueryRegistration(false)
                 .setHistoryBasedOptimizerEstimateSizeUsingVariables(false)
@@ -186,6 +187,9 @@ public class TestFeaturesConfig
                 .setMaterializedViewDataConsistencyEnabled(true)
                 .setMaterializedViewPartitionFilteringEnabled(true)
                 .setQueryOptimizationWithMaterializedViewEnabled(false)
+                .setLegacyMaterializedViews(true)
+                .setAllowLegacyMaterializedViewsToggle(false)
+                .setMaterializedViewAllowFullRefreshEnabled(false)
                 .setVerboseRuntimeStatsEnabled(false)
                 .setAggregationIfToFilterRewriteStrategy(AggregationIfToFilterRewriteStrategy.DISABLED)
                 .setAnalyzerType("BUILTIN")
@@ -195,12 +199,14 @@ public class TestFeaturesConfig
                 .setHyperloglogStandardErrorWarningThreshold(0.004)
                 .setPreferMergeJoinForSortedInputs(false)
                 .setPreferSortMergeJoin(false)
+                .setSortedExchangeEnabled(false)
                 .setSegmentedAggregationEnabled(false)
                 .setQueryAnalyzerTimeout(new Duration(3, MINUTES))
                 .setQuickDistinctLimitEnabled(false)
                 .setPushRemoteExchangeThroughGroupId(false)
                 .setOptimizeMultipleApproxPercentileOnSameFieldEnabled(true)
                 .setNativeExecutionEnabled(false)
+                .setBuiltInSidecarFunctionsEnabled(false)
                 .setDisableTimeStampWithTimeZoneForNative(false)
                 .setDisableIPAddressForNative(false)
                 .setNativeExecutionExecutablePath("./presto_server")
@@ -209,6 +215,7 @@ public class TestFeaturesConfig
                 .setNativeEnforceJoinBuildInputPartition(true)
                 .setRandomizeOuterJoinNullKeyEnabled(false)
                 .setRandomizeOuterJoinNullKeyStrategy(RandomizeOuterJoinNullKeyStrategy.DISABLED)
+                .setRandomizeNullSourceKeyInSemiJoinStrategy(FeaturesConfig.RandomizeNullSourceKeyInSemiJoinStrategy.DISABLED)
                 .setShardedJoinStrategy(FeaturesConfig.ShardedJoinStrategy.DISABLED)
                 .setJoinShardCount(100)
                 .setOptimizeConditionalAggregationEnabled(false)
@@ -262,12 +269,14 @@ public class TestFeaturesConfig
                 .setAddExchangeBelowPartialAggregationOverGroupId(false)
                 .setAddDistinctBelowSemiJoinBuild(false)
                 .setPushdownSubfieldForMapFunctions(true)
+                .setUtilizeUniquePropertyInQueryPlanning(true)
                 .setInnerJoinPushdownEnabled(false)
                 .setBroadcastSemiJoinForDelete(true)
                 .setInEqualityJoinPushdownEnabled(false)
                 .setRewriteMinMaxByToTopNEnabled(false)
                 .setPrestoSparkExecutionEnvironment(false)
-                .setMaxSerializableObjectSize(1000));
+                .setMaxSerializableObjectSize(1000)
+                .setUseConnectorProvidedSerializationCodecs(false));
     }
 
     @Test
@@ -312,6 +321,7 @@ public class TestFeaturesConfig
                 .put("optimizer.use-perfectly-consistent-histories", "true")
                 .put("optimizer.history-canonical-plan-node-limit", "2")
                 .put("optimizer.history-based-optimizer-plan-canonicalization-strategies", "IGNORE_SAFE_CONSTANTS,IGNORE_SCAN_CONSTANTS")
+                .put("optimizer.query-types-enabled-for-hbo", "SELECT,INSERT,DELETE")
                 .put("optimizer.log-plans-used-in-history-based-optimizer", "true")
                 .put("optimizer.enforce-timeout-for-hbo-query-registration", "true")
                 .put("optimizer.history-based-optimizer-estimate-size-using-variables", "true")
@@ -401,6 +411,9 @@ public class TestFeaturesConfig
                 .put("materialized-view-data-consistency-enabled", "false")
                 .put("consider-query-filters-for-materialized-view-partitions", "false")
                 .put("query-optimization-with-materialized-view-enabled", "true")
+                .put("experimental.legacy-materialized-views", "false")
+                .put("experimental.allow-legacy-materialized-views-toggle", "true")
+                .put("materialized-view-allow-full-refresh-enabled", "true")
                 .put("analyzer-type", "CRUX")
                 .put("pre-process-metadata-calls", "true")
                 .put("verbose-runtime-stats-enabled", "true")
@@ -410,12 +423,14 @@ public class TestFeaturesConfig
                 .put("hyperloglog-standard-error-warning-threshold", "0.02")
                 .put("optimizer.prefer-merge-join-for-sorted-inputs", "true")
                 .put("experimental.optimizer.prefer-sort-merge-join", "true")
+                .put("experimental.optimizer.sorted-exchange-enabled", "true")
                 .put("optimizer.segmented-aggregation-enabled", "true")
                 .put("planner.query-analyzer-timeout", "10s")
                 .put("optimizer.quick-distinct-limit-enabled", "true")
                 .put("optimizer.push-remote-exchange-through-group-id", "true")
                 .put("optimizer.optimize-multiple-approx-percentile-on-same-field", "false")
                 .put("native-execution-enabled", "true")
+                .put("built-in-sidecar-functions-enabled", "true")
                 .put("disable-timestamp-with-timezone-for-native-execution", "true")
                 .put("disable-ipaddress-for-native-execution", "true")
                 .put("native-execution-executable-path", "/bin/echo")
@@ -424,6 +439,7 @@ public class TestFeaturesConfig
                 .put("native-enforce-join-build-input-partition", "false")
                 .put("optimizer.randomize-outer-join-null-key", "true")
                 .put("optimizer.randomize-outer-join-null-key-strategy", "key_from_outer_join")
+                .put("optimizer.randomize-null-source-key-in-semi-join-strategy", "always")
                 .put("optimizer.sharded-join-strategy", "cost_based")
                 .put("optimizer.join-shard-count", "200")
                 .put("optimizer.optimize-conditional-aggregation-enabled", "true")
@@ -480,8 +496,10 @@ public class TestFeaturesConfig
                 .put("exclude-invalid-worker-session-properties", "true")
                 .put("optimizer.add-distinct-below-semi-join-build", "true")
                 .put("optimizer.pushdown-subfield-for-map-functions", "false")
+                .put("optimizer.utilize-unique-property-in-query-planning", "false")
                 .put("optimizer.add-exchange-below-partial-aggregation-over-group-id", "true")
                 .put("max_serializable_object_size", "50")
+                .put("use-connector-provided-serialization-codecs", "true")
                 .build();
 
         FeaturesConfig expected = new FeaturesConfig()
@@ -523,6 +541,7 @@ public class TestFeaturesConfig
                 .setHistoryCanonicalPlanNodeLimit(2)
                 .setHistoryBasedOptimizerTimeout(new Duration(1, SECONDS))
                 .setHistoryBasedOptimizerPlanCanonicalizationStrategies("IGNORE_SAFE_CONSTANTS,IGNORE_SCAN_CONSTANTS")
+                .setQueryTypesEnabledForHbo("SELECT,INSERT,DELETE")
                 .setLogPlansUsedInHistoryBasedOptimizer(true)
                 .setEnforceTimeoutForHBOQueryRegistration(true)
                 .setHistoryBasedOptimizerEstimateSizeUsingVariables(true)
@@ -613,6 +632,9 @@ public class TestFeaturesConfig
                 .setMaterializedViewDataConsistencyEnabled(false)
                 .setMaterializedViewPartitionFilteringEnabled(false)
                 .setQueryOptimizationWithMaterializedViewEnabled(true)
+                .setLegacyMaterializedViews(false)
+                .setAllowLegacyMaterializedViewsToggle(true)
+                .setMaterializedViewAllowFullRefreshEnabled(true)
                 .setVerboseRuntimeStatsEnabled(true)
                 .setAggregationIfToFilterRewriteStrategy(AggregationIfToFilterRewriteStrategy.FILTER_WITH_IF)
                 .setAnalyzerType("CRUX")
@@ -622,12 +644,14 @@ public class TestFeaturesConfig
                 .setHyperloglogStandardErrorWarningThreshold(0.02)
                 .setPreferMergeJoinForSortedInputs(true)
                 .setPreferSortMergeJoin(true)
+                .setSortedExchangeEnabled(true)
                 .setSegmentedAggregationEnabled(true)
                 .setQueryAnalyzerTimeout(new Duration(10, SECONDS))
                 .setQuickDistinctLimitEnabled(true)
                 .setPushRemoteExchangeThroughGroupId(true)
                 .setOptimizeMultipleApproxPercentileOnSameFieldEnabled(false)
                 .setNativeExecutionEnabled(true)
+                .setBuiltInSidecarFunctionsEnabled(true)
                 .setDisableTimeStampWithTimeZoneForNative(true)
                 .setDisableIPAddressForNative(true)
                 .setNativeExecutionExecutablePath("/bin/echo")
@@ -636,6 +660,7 @@ public class TestFeaturesConfig
                 .setNativeEnforceJoinBuildInputPartition(false)
                 .setRandomizeOuterJoinNullKeyEnabled(true)
                 .setRandomizeOuterJoinNullKeyStrategy(RandomizeOuterJoinNullKeyStrategy.KEY_FROM_OUTER_JOIN)
+                .setRandomizeNullSourceKeyInSemiJoinStrategy(FeaturesConfig.RandomizeNullSourceKeyInSemiJoinStrategy.ALWAYS)
                 .setShardedJoinStrategy(FeaturesConfig.ShardedJoinStrategy.COST_BASED)
                 .setJoinShardCount(200)
                 .setOptimizeConditionalAggregationEnabled(true)
@@ -689,12 +714,14 @@ public class TestFeaturesConfig
                 .setAddExchangeBelowPartialAggregationOverGroupId(true)
                 .setAddDistinctBelowSemiJoinBuild(true)
                 .setPushdownSubfieldForMapFunctions(false)
+                .setUtilizeUniquePropertyInQueryPlanning(false)
                 .setInEqualityJoinPushdownEnabled(true)
                 .setBroadcastSemiJoinForDelete(false)
                 .setRewriteMinMaxByToTopNEnabled(true)
                 .setInnerJoinPushdownEnabled(true)
                 .setPrestoSparkExecutionEnvironment(true)
-                .setMaxSerializableObjectSize(50);
+                .setMaxSerializableObjectSize(50)
+                .setUseConnectorProvidedSerializationCodecs(true);
         assertFullMapping(properties, expected);
     }
 

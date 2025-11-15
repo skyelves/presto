@@ -37,11 +37,11 @@ import org.testng.annotations.Test;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
-import java.util.function.Consumer;
 
 import static com.facebook.presto.SystemSessionProperties.CONSIDER_QUERY_FILTERS_FOR_MATERIALIZED_VIEW_PARTITIONS;
 import static com.facebook.presto.SystemSessionProperties.JOIN_DISTRIBUTION_TYPE;
 import static com.facebook.presto.SystemSessionProperties.JOIN_REORDERING_STRATEGY;
+import static com.facebook.presto.SystemSessionProperties.MATERIALIZED_VIEW_DATA_CONSISTENCY_ENABLED;
 import static com.facebook.presto.SystemSessionProperties.PREFER_PARTIAL_AGGREGATION;
 import static com.facebook.presto.SystemSessionProperties.QUERY_OPTIMIZATION_WITH_MATERIALIZED_VIEW_ENABLED;
 import static com.facebook.presto.SystemSessionProperties.SIMPLIFY_PLAN_WITH_EMPTY_INPUT;
@@ -72,6 +72,7 @@ import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.join;
 import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.node;
 import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.project;
 import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.singleGroupingSet;
+import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.tableScan;
 import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.unnest;
 import static com.facebook.presto.sql.planner.assertions.PlanMatchPattern.values;
 import static com.facebook.presto.testing.TestingAccessControlManager.TestingPrivilegeType.INSERT_TABLE;
@@ -100,7 +101,7 @@ public class TestHiveMaterializedViewLogicalPlanner
     {
         return HiveQueryRunner.createQueryRunner(
                 ImmutableList.of(ORDERS, LINE_ITEM, CUSTOMER, NATION, SUPPLIER),
-                ImmutableMap.of(),
+                ImmutableMap.of("experimental.allow-legacy-materialized-views-toggle", "true"),
                 Optional.empty());
     }
 
@@ -2592,12 +2593,25 @@ public class TestHiveMaterializedViewLogicalPlanner
     public void testMaterializedViewQueryAccessControl()
     {
         QueryRunner queryRunner = getQueryRunner();
-        Session invokerSession = Session.builder(getSession())
+
+        Session invokerStichingSession = Session.builder(getSession())
                 .setIdentity(new Identity("test_view_invoker", Optional.empty()))
                 .setCatalog(getSession().getCatalog().get())
                 .setSchema(getSession().getSchema().get())
                 .setSystemProperty(QUERY_OPTIMIZATION_WITH_MATERIALIZED_VIEW_ENABLED, "true")
                 .build();
+
+        /* Non-stitching session test is needed as the query is not rewritten
+        with base table. In this case the analyzer should process the materialized view
+        definition sql to check all the base tables permissions.
+        */
+        Session invokerNonStichingSession = Session.builder(getSession())
+                .setIdentity(new Identity("test_view_invoker2", Optional.empty()))
+                .setCatalog(getSession().getCatalog().get())
+                .setSchema(getSession().getSchema().get())
+                .setSystemProperty(MATERIALIZED_VIEW_DATA_CONSISTENCY_ENABLED, "false")
+                .build();
+
         Session ownerSession = getSession();
 
         queryRunner.execute(
@@ -2611,37 +2625,60 @@ public class TestHiveMaterializedViewLogicalPlanner
                         "AS SELECT SUM(totalprice) AS totalprice, orderstatus FROM test_orders_base GROUP BY orderstatus");
         setReferencedMaterializedViews((DistributedQueryRunner) getQueryRunner(), "test_orders_base", ImmutableList.of("test_orders_view"));
 
-        Consumer<String> testQueryWithDeniedPrivilege = query -> {
-            // Verify checking the base table instead of the materialized view for SELECT permission
-            assertAccessDenied(
-                    invokerSession,
-                    query,
-                    "Cannot select from columns \\[.*\\] in table .*test_orders_base.*",
-                    privilege(invokerSession.getUser(), "test_orders_base", SELECT_COLUMN));
-            assertAccessAllowed(
-                    invokerSession,
-                    query,
-                    privilege(invokerSession.getUser(), "test_orders_view", SELECT_COLUMN));
-        };
-
         try {
             // Check for both the direct materialized view query and the base table query optimization with materialized view
-            String directMaterializedViewQuery = "SELECT totalprice, orderstatus FROM test_orders_view";
-            String queryWithMaterializedViewOptimization = "SELECT SUM(totalprice) AS totalprice, orderstatus FROM test_orders_base GROUP BY orderstatus";
+            // for direct materialized view query, check when stitching is enabled/disabled
+            String queryMaterializedView = "SELECT totalprice, orderstatus FROM test_orders_view";
+            String queryBaseTable = "SELECT SUM(totalprice) AS totalprice, orderstatus FROM test_orders_base GROUP BY orderstatus";
 
-            // Test when the materialized view is not materialized yet
-            testQueryWithDeniedPrivilege.accept(directMaterializedViewQuery);
-            testQueryWithDeniedPrivilege.accept(queryWithMaterializedViewOptimization);
+            assertAccessDenied(
+                    invokerNonStichingSession,
+                    queryBaseTable,
+                    "Cannot select from columns \\[.*\\] in table .*test_orders_base.*",
+                    privilege(invokerNonStichingSession.getUser(), "test_orders_base", SELECT_COLUMN));
+
+            assertAccessDenied(
+                    invokerStichingSession,
+                    queryBaseTable,
+                    "Cannot select from columns \\[.*\\] in table .*test_orders_base.*",
+                    privilege(invokerStichingSession.getUser(), "test_orders_base", SELECT_COLUMN));
+
+            assertAccessAllowed(
+                    invokerStichingSession,
+                    queryMaterializedView,
+                    privilege(invokerStichingSession.getUser(), "test_orders_view", SELECT_COLUMN));
+
+            assertAccessDenied(
+                    invokerNonStichingSession,
+                    queryMaterializedView,
+                    "Cannot select from columns \\[.*\\] in table .*test_orders_base.*",
+                    privilege(invokerNonStichingSession.getUser(), "test_orders_base", SELECT_COLUMN));
 
             // Test when the materialized view is partially materialized
             queryRunner.execute(ownerSession, "REFRESH MATERIALIZED VIEW test_orders_view WHERE orderstatus = 'F'");
-            testQueryWithDeniedPrivilege.accept(directMaterializedViewQuery);
-            testQueryWithDeniedPrivilege.accept(queryWithMaterializedViewOptimization);
+            assertAccessAllowed(
+                    invokerStichingSession,
+                    queryMaterializedView,
+                    privilege(invokerStichingSession.getUser(), "test_orders_view", SELECT_COLUMN));
+
+            assertAccessDenied(
+                    invokerNonStichingSession,
+                    queryMaterializedView,
+                    "Cannot select from columns \\[.*\\] in table .*test_orders_base.*",
+                    privilege(invokerNonStichingSession.getUser(), "test_orders_base", SELECT_COLUMN));
 
             // Test when the materialized view is fully materialized
             queryRunner.execute(ownerSession, "REFRESH MATERIALIZED VIEW test_orders_view WHERE orderstatus <> 'F'");
-            testQueryWithDeniedPrivilege.accept(directMaterializedViewQuery);
-            testQueryWithDeniedPrivilege.accept(queryWithMaterializedViewOptimization);
+            assertAccessAllowed(
+                    invokerStichingSession,
+                    queryMaterializedView,
+                    privilege(invokerStichingSession.getUser(), "test_orders_view", SELECT_COLUMN));
+
+            assertAccessDenied(
+                    invokerNonStichingSession,
+                    queryMaterializedView,
+                    "Cannot select from columns \\[.*\\] in table .*test_orders_base.*",
+                    privilege(invokerNonStichingSession.getUser(), "test_orders_base", SELECT_COLUMN));
         }
         finally {
             queryRunner.execute(ownerSession, "DROP MATERIALIZED VIEW test_orders_view");
@@ -2722,6 +2759,242 @@ public class TestHiveMaterializedViewLogicalPlanner
         finally {
             queryRunner.execute(ownerSession, "DROP MATERIALIZED VIEW test_orders_view");
             queryRunner.execute(ownerSession, "DROP TABLE test_orders_base");
+        }
+    }
+
+    @Test
+    public void testAutoRefreshMaterializedViewWithoutPredicates()
+    {
+        QueryRunner queryRunner = getQueryRunner();
+        String table = "test_orders_auto_refresh_source";
+        String view = "test_orders_auto_refresh_target_mv";
+        String view2 = "test_orders_auto_refresh_target_mv2";
+
+        Session nonFullRefreshSession = getSession();
+
+        Session fullRefreshSession = Session.builder(getSession())
+                .setSystemProperty("materialized_view_allow_full_refresh_enabled", "true")
+                .setSystemProperty("materialized_view_data_consistency_enabled", "false")
+                .build();
+
+        queryRunner.execute(
+                fullRefreshSession,
+                format("CREATE TABLE %s WITH (partitioned_by = ARRAY['orderstatus']) " +
+                        "AS SELECT orderkey, custkey, totalprice, orderstatus FROM orders WHERE orderkey < 100", table));
+
+        queryRunner.execute(
+                fullRefreshSession,
+                format("CREATE MATERIALIZED VIEW %s " +
+                        "WITH (partitioned_by = ARRAY['orderstatus']) " +
+                        "AS SELECT SUM(totalprice) AS total, COUNT(*) AS cnt, orderstatus " +
+                        "FROM %s GROUP BY orderstatus", view, table));
+
+        queryRunner.execute(
+                nonFullRefreshSession,
+                format("CREATE MATERIALIZED VIEW %s " +
+                        "WITH (partitioned_by = ARRAY['orderstatus']) " +
+                        "AS SELECT SUM(totalprice) AS total, COUNT(*) AS cnt, orderstatus " +
+                        "FROM %s GROUP BY orderstatus", view2, table));
+
+        try {
+            // Test that refresh without predicates succeeds when flag is enabled
+            queryRunner.execute(fullRefreshSession, format("REFRESH MATERIALIZED VIEW %s", view));
+
+            // Verify all partitions are refreshed
+            MaterializedResult result = queryRunner.execute(fullRefreshSession,
+                    format("SELECT COUNT(DISTINCT orderstatus) FROM %s", view));
+            assertTrue(((Long) result.getOnlyValue()) > 0, "Materialized view should contain data after auto-refresh");
+
+            // Test that refresh without predicates fails when flag is not enabled
+            assertQueryFails(
+                    nonFullRefreshSession,
+                    format("REFRESH MATERIALIZED VIEW %s", view2),
+                    ".*misses too many partitions or is never refreshed and may incur high cost.*");
+        }
+        finally {
+            queryRunner.execute(fullRefreshSession, format("DROP MATERIALIZED VIEW %s", view));
+            queryRunner.execute(fullRefreshSession, format("DROP TABLE %s", table));
+        }
+    }
+
+    @Test
+    public void testAutoRefreshMaterializedViewWithJoinWithoutPredicates()
+    {
+        QueryRunner queryRunner = getQueryRunner();
+
+        String table1 = "test_customer_auto_refresh";
+        String table2 = "test_orders_join_auto_refresh";
+        String view = "test_auto_refresh_join_target_mv";
+
+        Session fullRefreshSession = Session.builder(getSession())
+                .setSystemProperty("materialized_view_allow_full_refresh_enabled", "true")
+                .setSystemProperty("materialized_view_data_consistency_enabled", "false")
+                .build();
+        Session ownerSession = getSession();
+
+        queryRunner.execute(
+                fullRefreshSession,
+                format("CREATE TABLE %s WITH (partitioned_by = ARRAY['nationkey']) " +
+                        "AS SELECT custkey, name, nationkey FROM customer WHERE custkey < 100", table1));
+        queryRunner.execute(
+                fullRefreshSession,
+                format("CREATE TABLE %s WITH (partitioned_by = ARRAY['orderstatus']) " +
+                        "AS SELECT orderkey, custkey, totalprice, orderstatus FROM orders WHERE orderkey < 100", table2));
+        queryRunner.execute(
+                fullRefreshSession,
+                format("CREATE MATERIALIZED VIEW %s " +
+                        "WITH (partitioned_by = ARRAY['nationkey', 'orderstatus']) " +
+                        "AS SELECT c.name, SUM(o.totalprice) AS total, c.nationkey, o.orderstatus " +
+                        "FROM %s c JOIN %s o ON c.custkey = o.custkey " +
+                        "GROUP BY c.name, c.nationkey, o.orderstatus", view, table1, table2));
+
+        try {
+            queryRunner.execute(fullRefreshSession, format("REFRESH MATERIALIZED VIEW %s", view));
+
+            MaterializedResult result = queryRunner.execute(fullRefreshSession,
+                    format("SELECT COUNT(*) FROM %s", view));
+            assertTrue(((Long) result.getOnlyValue()) > 0,
+                    "Materialized view with join should contain data after auto-refresh");
+        }
+        finally {
+            queryRunner.execute(ownerSession, format("DROP MATERIALIZED VIEW %s", view));
+            queryRunner.execute(ownerSession, format("DROP TABLE %s", table1));
+            queryRunner.execute(ownerSession, format("DROP TABLE %s", table2));
+        }
+    }
+
+    @Test
+    public void testAutoRefreshMaterializedViewFullyRefreshed()
+    {
+        QueryRunner queryRunner = getQueryRunner();
+
+        String table = "test_customer_auto_refresh";
+        String view = "test_auto_refresh_join_target_mv";
+
+        Session fullRefreshSession = Session.builder(getSession())
+                .setSystemProperty("materialized_view_allow_full_refresh_enabled", "true")
+                .setSystemProperty("materialized_view_data_consistency_enabled", "false")
+                .build();
+        Session ownerSession = getSession();
+
+        queryRunner.execute(
+                fullRefreshSession,
+                format("CREATE TABLE %s WITH (partitioned_by = ARRAY['nationkey']) " +
+                        "AS SELECT custkey, name, nationkey FROM customer WHERE custkey < 100", table));
+
+        queryRunner.execute(
+                fullRefreshSession,
+                format("CREATE MATERIALIZED VIEW %s " +
+                        "WITH (partitioned_by = ARRAY['nationkey']) " +
+                        "AS SELECT custkey, nationkey FROM %s", view, table));
+
+        try {
+            queryRunner.execute(fullRefreshSession, format("REFRESH MATERIALIZED VIEW %s", view));
+
+            MaterializedResult result = queryRunner.execute(fullRefreshSession,
+                    format("REFRESH MATERIALIZED VIEW %s", view));
+
+            assertEquals(result.getWarnings().size(), 1);
+            assertTrue(result.getWarnings().get(0).getMessage().matches("Materialized view .* is already fully refreshed"));
+        }
+        finally {
+            queryRunner.execute(ownerSession, format("DROP MATERIALIZED VIEW %s", view));
+            queryRunner.execute(ownerSession, format("DROP TABLE %s", table));
+        }
+    }
+
+    @Test
+    public void testAutoRefreshMaterializedViewAfterInsertion()
+    {
+        QueryRunner queryRunner = getQueryRunner();
+
+        String table = "test_auto_refresh";
+        String view = "test_auto_refresh_mv";
+
+        Session fullRefreshSession = Session.builder(getSession())
+                .setSystemProperty("materialized_view_allow_full_refresh_enabled", "true")
+                .setSystemProperty("materialized_view_data_consistency_enabled", "false")
+                .build();
+        Session ownerSession = getSession();
+
+        queryRunner.execute(
+                fullRefreshSession,
+                format("CREATE TABLE %s (col1 bigint, col2 varchar, part_key varchar) " +
+                        "WITH (partitioned_by = ARRAY['part_key'])", table));
+
+        queryRunner.execute(
+                fullRefreshSession,
+                format("INSERT INTO %s VALUES (1, 'aaa', 'p1'), " +
+                        "(2, 'bbb', 'p2'), (3, 'aaa', 'p1')", table));
+
+        queryRunner.execute(
+                fullRefreshSession,
+                format("CREATE MATERIALIZED VIEW %s " +
+                        "WITH (partitioned_by = ARRAY['part_key']) " +
+                        "AS SELECT col1, part_key FROM %s", view, table));
+
+        try {
+            queryRunner.execute(fullRefreshSession, format("REFRESH MATERIALIZED VIEW %s", view));
+
+            MaterializedResult result = queryRunner.execute(fullRefreshSession,
+                    format("SELECT COUNT(DISTINCT part_key) FROM %s", view));
+            assertEquals((long) ((Long) result.getOnlyValue()), 2, "Materialized view should contain all data after refreshes");
+
+            queryRunner.execute(
+                    fullRefreshSession,
+                    format("INSERT INTO %s VALUES (1, 'aaa', 'p3'), " +
+                            "(2, 'bbb', 'p4'), (3, 'aaa', 'p5')", table));
+
+            queryRunner.execute(fullRefreshSession,
+                    format("REFRESH MATERIALIZED VIEW %s", view));
+
+            result = queryRunner.execute(fullRefreshSession,
+                    format("SELECT COUNT(DISTINCT part_key) FROM %s", view));
+            assertEquals((long) ((Long) result.getOnlyValue()), 5, "Materialized view should contain all data after refreshes");
+        }
+        finally {
+            queryRunner.execute(ownerSession, format("DROP MATERIALIZED VIEW %s", view));
+            queryRunner.execute(ownerSession, format("DROP TABLE %s", table));
+        }
+    }
+
+    public void testMaterializedViewNotRefreshedInNonLegacyMode()
+    {
+        Session nonLegacySession = Session.builder(getSession())
+                .setSystemProperty("legacy_materialized_views", "false")
+                .build();
+        try {
+            assertUpdate("CREATE TABLE base_table (id BIGINT, name VARCHAR, part_key BIGINT) WITH (partitioned_by = ARRAY['part_key'])");
+            assertUpdate("INSERT INTO base_table VALUES (1, 'Alice', 100), (2, 'Bob', 200)", 2);
+            assertUpdate("CREATE MATERIALIZED VIEW simple_mv WITH (partitioned_by = ARRAY['part_key']) AS SELECT id, name, part_key FROM base_table");
+
+            assertPlan(nonLegacySession, "SELECT * FROM simple_mv",
+                    anyTree(tableScan("base_table")));
+        }
+        finally {
+            assertUpdate("DROP TABLE base_table");
+            assertUpdate("DROP MATERIALIZED VIEW simple_mv");
+        }
+    }
+
+    @Test
+    public void testMaterializedViewRefreshedInNonLegacyMode()
+    {
+        Session nonLegacySession = Session.builder(getSession())
+                .setSystemProperty("legacy_materialized_views", "false")
+                .build();
+        try {
+            assertUpdate("CREATE TABLE base_table (id BIGINT, name VARCHAR, part_key BIGINT) WITH (partitioned_by = ARRAY['part_key'])");
+            assertUpdate("INSERT INTO base_table VALUES (1, 'Alice', 100), (2, 'Bob', 200)", 2);
+            assertUpdate("CREATE MATERIALIZED VIEW simple_mv WITH (partitioned_by = ARRAY['part_key']) AS SELECT id, name, part_key FROM base_table");
+            assertUpdate("REFRESH MATERIALIZED VIEW simple_mv where part_key > 0", 2);
+
+            assertPlan(nonLegacySession, "SELECT * FROM simple_mv",
+                    anyTree(tableScan("simple_mv")));
+        }
+        finally {
+            assertUpdate("DROP TABLE base_table");
+            assertUpdate("DROP MATERIALIZED VIEW simple_mv");
         }
     }
 

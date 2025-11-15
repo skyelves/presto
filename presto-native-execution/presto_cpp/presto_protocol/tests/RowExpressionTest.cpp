@@ -41,7 +41,8 @@ const std::string strJson = R"(
                             "integer"
                          ],
                          "variableArity":false
-                      }
+                      },
+                     "builtInFunctionKind": "ENGINE"
                    },
                    "returnType":"bigint",
                    "arguments":[
@@ -67,7 +68,7 @@ class RowExpressionTest : public ::testing::Test {};
 TEST_F(RowExpressionTest, constant) {
   std::string str = R"(
         {
-            "@type": "constant",   
+            "@type": "constant",
             "valueBlock":"CgAAAExPTkdfQVJSQVkBAAAAAAAAAAAAAAAA",
             "type":"bigint"
         }
@@ -109,7 +110,8 @@ TEST_F(RowExpressionTest, call) {
                     "integer"
                  ],
                  "variableArity":false
-              }
+              },
+              "builtInFunctionKind": "ENGINE"
            },
            "returnType":"bigint",
            "arguments":[

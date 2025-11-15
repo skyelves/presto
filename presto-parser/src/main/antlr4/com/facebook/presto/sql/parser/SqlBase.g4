@@ -73,15 +73,17 @@ statement
         '(' sqlParameterDeclaration (',' sqlParameterDeclaration)* ')'
         | type)                                                        #createType
     | CREATE (OR REPLACE)? VIEW qualifiedName
-            (SECURITY (DEFINER | INVOKER))? AS query                   #createView
+            viewSecurity? AS query                                     #createView
     | ALTER VIEW (IF EXISTS)? from=qualifiedName
         RENAME TO to=qualifiedName                                     #renameView
     | DROP VIEW (IF EXISTS)? qualifiedName                             #dropView
     | CREATE MATERIALIZED VIEW (IF NOT EXISTS)? qualifiedName
         (COMMENT string)?
+        viewSecurity?
         (WITH properties)? AS (query | '('query')')                    #createMaterializedView
     | DROP MATERIALIZED VIEW (IF EXISTS)? qualifiedName                #dropMaterializedView
-    | REFRESH MATERIALIZED VIEW qualifiedName WHERE booleanExpression  #refreshMaterializedView
+    | REFRESH MATERIALIZED VIEW qualifiedName
+        (WHERE where=booleanExpression)?                               #refreshMaterializedView
     | CREATE (OR REPLACE)? TEMPORARY? FUNCTION functionName=qualifiedName
         '(' (sqlParameterDeclaration (',' sqlParameterDeclaration)*)? ')'
         RETURNS returnType=type
@@ -152,6 +154,8 @@ statement
     | UPDATE qualifiedName
         SET updateAssignment (',' updateAssignment)*
         (WHERE where=booleanExpression)?                               #update
+    | MERGE INTO qualifiedName (AS? identifier)?
+        USING relation ON expression mergeCase+                        #mergeInto
     ;
 
 query
@@ -235,6 +239,10 @@ nullCallClause
 
 externalRoutineName
     : identifier
+    ;
+
+viewSecurity
+    : SECURITY (DEFINER | INVOKER)
     ;
 
 queryNoWith:
@@ -528,6 +536,15 @@ filter
     : FILTER '(' WHERE booleanExpression ')'
     ;
 
+mergeCase
+    : WHEN MATCHED THEN
+        UPDATE SET targetColumns+=identifier EQ values+=expression
+          (',' targetColumns+=identifier EQ values+=expression)*            #mergeUpdate
+    | WHEN NOT MATCHED THEN
+        INSERT ('(' columns+=identifier (',' columns+=identifier)* ')')?
+        VALUES '(' values+=expression (',' values+=expression)* ')'         #mergeInsert
+    ;
+
 over
     : OVER '('
         (PARTITION BY partition+=expression (',' partition+=expression)*)?
@@ -553,7 +570,7 @@ frameBound
     ;
 
 updateAssignment
-    : identifier '=' expression
+    : identifier EQ expression
     ;
 
 explainOption
@@ -678,7 +695,7 @@ nonReserved
     | JSON
     | KEEP | KEY
     | LANGUAGE | LAST | LATERAL | LEVEL | LIMIT | LOGICAL
-    | MAP | MATERIALIZED | MINUTE | MONTH
+    | MAP | MATCHED | MATERIALIZED | MERGE | MINUTE | MONTH
     | NAME | NFC | NFD | NFKC | NFKD | NO | NONE | NULLIF | NULLS
     | OF | OFFSET | ONLY | OPTION | ORDINALITY | OUTPUT | OVER
     | PARTITION | PARTITIONS | POSITION | PRECEDING | PRIMARY | PRIVILEGES | PROPERTIES | PRUNE
@@ -806,7 +823,9 @@ LOCALTIME: 'LOCALTIME';
 LOCALTIMESTAMP: 'LOCALTIMESTAMP';
 LOGICAL: 'LOGICAL';
 MAP: 'MAP';
+MATCHED: 'MATCHED';
 MATERIALIZED: 'MATERIALIZED';
+MERGE: 'MERGE';
 MINUTE: 'MINUTE';
 MONTH: 'MONTH';
 NAME: 'NAME';

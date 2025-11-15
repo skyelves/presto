@@ -4,7 +4,7 @@
     <parent>
         <groupId>com.facebook.presto</groupId>
         <artifactId>presto-root</artifactId>
-        <version>0.295-SNAPSHOT</version>
+        <version>0.296-SNAPSHOT</version>
     </parent>
     <artifactId>presto-elasticsearch</artifactId>
     <name>presto-elasticsearch</name>
@@ -16,6 +16,7 @@
         <dep.elasticsearch.version>7.17.27</dep.elasticsearch.version>
         <dep.log4j.version>2.24.3</dep.log4j.version>
         <air.check.skip-modernizer>true</air.check.skip-modernizer>
+        <dep.lucene.version>8.11.3</dep.lucene.version>
     </properties>
 
     <dependencies>
@@ -225,7 +226,6 @@
         <dependency>
             <groupId>org.jetbrains</groupId>
             <artifactId>annotations</artifactId>
-            <version>19.0.0</version>
             <scope>test</scope>
         </dependency>
 

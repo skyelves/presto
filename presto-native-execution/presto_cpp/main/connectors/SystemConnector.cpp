@@ -74,6 +74,7 @@ SystemTableHandle::SystemTableHandle(
     std::string schemaName,
     std::string tableName)
     : ConnectorTableHandle(std::move(connectorId)),
+      name_(fmt::format("{}.{}", schemaName, tableName)),
       schemaName_(std::move(schemaName)),
       tableName_(std::move(tableName)) {
   VELOX_USER_CHECK_EQ(
@@ -110,7 +111,8 @@ SystemDataSource::SystemDataSource(
         "ColumnHandle is missing for output column '{}'",
         outputName);
 
-    auto handle = std::dynamic_pointer_cast<const SystemColumnHandle>(it->second);
+    auto handle =
+        std::dynamic_pointer_cast<const SystemColumnHandle>(it->second);
     VELOX_CHECK_NOT_NULL(
         handle,
         "ColumnHandle must be an instance of SystemColumnHandle "
@@ -374,8 +376,7 @@ std::unique_ptr<velox::connector::ConnectorTableHandle>
 SystemPrestoToVeloxConnector::toVeloxTableHandle(
     const protocol::TableHandle& tableHandle,
     const VeloxExprConverter& exprConverter,
-    const TypeParser& typeParser,
-    velox::connector::ColumnHandleMap& assignments) const {
+    const TypeParser& typeParser) const {
   auto systemLayout =
       std::dynamic_pointer_cast<const protocol::SystemTableLayoutHandle>(
           tableHandle.connectorTableLayout);

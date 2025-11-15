@@ -69,21 +69,21 @@ extern const char* const PRESTO_ABORT_TASK_URL_PARAM;
 class Exception : public std::runtime_error {
  public:
   explicit Exception(const std::string& message)
-      : std::runtime_error(message){};
+      : std::runtime_error(message) {};
 };
 
 class TypeError : public Exception {
  public:
-  explicit TypeError(const std::string& message) : Exception(message){};
+  explicit TypeError(const std::string& message) : Exception(message) {};
 };
 
 class OutOfRange : public Exception {
  public:
-  explicit OutOfRange(const std::string& message) : Exception(message){};
+  explicit OutOfRange(const std::string& message) : Exception(message) {};
 };
 class ParseError : public Exception {
  public:
-  explicit ParseError(const std::string& message) : Exception(message){};
+  explicit ParseError(const std::string& message) : Exception(message) {};
 };
 
 using String = std::string;
@@ -829,8 +829,14 @@ void to_json(json& j, const BufferInfo& p);
 void from_json(const json& j, BufferInfo& p);
 } // namespace facebook::presto::protocol
 namespace facebook::presto::protocol {
+enum class BuiltInFunctionKind { ENGINE, PLUGIN, WORKER };
+extern void to_json(json& j, const BuiltInFunctionKind& e);
+extern void from_json(const json& j, BuiltInFunctionKind& e);
+} // namespace facebook::presto::protocol
+namespace facebook::presto::protocol {
 struct BuiltInFunctionHandle : public FunctionHandle {
   Signature signature = {};
+  BuiltInFunctionKind builtInFunctionKind = {};
 
   BuiltInFunctionHandle() noexcept;
 };
@@ -1755,6 +1761,30 @@ void to_json(json& j, const MergeJoinNode& p);
 void from_json(const json& j, MergeJoinNode& p);
 } // namespace facebook::presto::protocol
 namespace facebook::presto::protocol {
+struct NodeLoadMetrics {
+  double cpuUsedPercent = {};
+  double memoryUsedInBytes = {};
+  int numQueuedDrivers = {};
+  bool cpuOverload = {};
+  bool memoryOverload = {};
+};
+void to_json(json& j, const NodeLoadMetrics& p);
+void from_json(const json& j, NodeLoadMetrics& p);
+} // namespace facebook::presto::protocol
+namespace facebook::presto::protocol {
+enum class NodeState { ACTIVE, INACTIVE, SHUTTING_DOWN };
+extern void to_json(json& j, const NodeState& e);
+extern void from_json(const json& j, NodeState& e);
+} // namespace facebook::presto::protocol
+namespace facebook::presto::protocol {
+struct NodeStats {
+  NodeState nodeState = {};
+  std::shared_ptr<NodeLoadMetrics> loadMetrics = {};
+};
+void to_json(json& j, const NodeStats& p);
+void from_json(const json& j, NodeStats& p);
+} // namespace facebook::presto::protocol
+namespace facebook::presto::protocol {
 struct NodeVersion {
   String version = {};
 };
@@ -1972,6 +2002,7 @@ struct PlanFragment {
   List<PlanNodeId> tableScanSchedulingOrder = {};
   PartitioningScheme partitioningScheme = {};
   StageExecutionDescriptor stageExecutionDescriptor = {};
+  std::shared_ptr<OrderingScheme> outputOrderingScheme = {};
   bool outputTableWriterFragment = {};
   std::shared_ptr<String> jsonRepresentation = {};
 };
@@ -2136,6 +2167,17 @@ void to_json(json& j, const ServerInfo& p);
 void from_json(const json& j, ServerInfo& p);
 } // namespace facebook::presto::protocol
 namespace facebook::presto::protocol {
+struct SessionPropertyMetadata {
+  String name = {};
+  String description = {};
+  TypeSignature typeSignature = {};
+  String defaultValue = {};
+  bool hidden = {};
+};
+void to_json(json& j, const SessionPropertyMetadata& p);
+void from_json(const json& j, SessionPropertyMetadata& p);
+} // namespace facebook::presto::protocol
+namespace facebook::presto::protocol {
 struct SortNode : public PlanNode {
   std::shared_ptr<PlanNode> source = {};
   OrderingScheme orderingScheme = {};
@@ -2156,6 +2198,30 @@ struct SortedRangeSet : public ValueSet {
 };
 void to_json(json& j, const SortedRangeSet& p);
 void from_json(const json& j, SortedRangeSet& p);
+} // namespace facebook::presto::protocol
+namespace facebook::presto::protocol {
+enum class SpatialJoinType { INNER, LEFT };
+extern void to_json(json& j, const SpatialJoinType& e);
+extern void from_json(const json& j, SpatialJoinType& e);
+} // namespace facebook::presto::protocol
+namespace facebook::presto::protocol {
+struct SpatialJoinNode : public PlanNode {
+  SpatialJoinType type = {};
+  std::shared_ptr<PlanNode> left = {};
+  std::shared_ptr<PlanNode> right = {};
+  List<VariableReferenceExpression> outputVariables = {};
+  VariableReferenceExpression probeGeometryVariable = {};
+  VariableReferenceExpression buildGeometryVariable = {};
+  std::shared_ptr<VariableReferenceExpression> radiusVariable = {};
+  std::shared_ptr<RowExpression> filter = {};
+  std::shared_ptr<VariableReferenceExpression> leftPartitionVariable = {};
+  std::shared_ptr<VariableReferenceExpression> rightPartitionVariable = {};
+  std::shared_ptr<String> kdbTree = {};
+
+  SpatialJoinNode() noexcept;
+};
+void to_json(json& j, const SpatialJoinNode& p);
+void from_json(const json& j, SpatialJoinNode& p);
 } // namespace facebook::presto::protocol
 namespace facebook::presto::protocol {
 enum class Form {
@@ -2520,9 +2586,4 @@ struct WindowNode : public PlanNode {
 };
 void to_json(json& j, const WindowNode& p);
 void from_json(const json& j, WindowNode& p);
-} // namespace facebook::presto::protocol
-namespace facebook::presto::protocol {
-enum class NodeState { ACTIVE, INACTIVE, SHUTTING_DOWN };
-extern void to_json(json& j, const NodeState& e);
-extern void from_json(const json& j, NodeState& e);
 } // namespace facebook::presto::protocol

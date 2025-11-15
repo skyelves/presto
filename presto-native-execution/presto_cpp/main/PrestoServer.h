@@ -120,9 +120,9 @@ class PrestoServer {
 
   /// Hook for derived PrestoServer implementations to add/stop additional
   /// periodic tasks.
-  virtual void addAdditionalPeriodicTasks(){};
+  virtual void addAdditionalPeriodicTasks() {};
 
-  virtual void stopAdditionalPeriodicTasks(){};
+  virtual void stopAdditionalPeriodicTasks() {};
 
   virtual void initializeCoordinatorDiscoverer();
 
@@ -133,7 +133,7 @@ class PrestoServer {
   virtual std::shared_ptr<velox::exec::ExprSetListener> getExprSetListener();
 
   virtual std::shared_ptr<facebook::velox::exec::SplitListenerFactory>
-    getSplitListenerFactory();
+  getSplitListenerFactory();
 
   virtual std::vector<std::string> registerVeloxConnectors(
       const fs::path& configDirectoryPath);
@@ -165,6 +165,8 @@ class PrestoServer {
 
   virtual void registerMemoryArbitrators();
 
+  virtual void registerTraceNodeFactories();
+
   /// Invoked after creating global (singleton) config objects (SystemConfig and
   /// NodeConfig) and before loading their properties from the file.
   /// In the implementation any extra config properties can be registered.
@@ -172,8 +174,8 @@ class PrestoServer {
 
   /// Invoked to get the ip address of the process. In certain deployment
   /// setup, each process has different ip address. Deployment environment
-  /// may provide there own library to get process specific ip address.
-  /// In such cases, getLocalIp can be overriden to pass process specific
+  /// may provide their own library to get process specific ip address.
+  /// In such cases, getLocalIp can be overridden to pass process specific
   /// ip address.
   virtual std::string getLocalIp() const;
 
@@ -208,6 +210,8 @@ class PrestoServer {
 
   void reportNodeStatus(proxygen::ResponseHandler* downstream);
 
+  void reportNodeStats(proxygen::ResponseHandler* downstream);
+
   void handleGracefulShutdown(
       const std::vector<std::unique_ptr<folly::IOBuf>>& body,
       proxygen::ResponseHandler* downstream);
@@ -226,6 +230,8 @@ class PrestoServer {
   std::unique_ptr<velox::cache::SsdCache> setupSsdCache();
 
   void checkOverload();
+
+  virtual void createTaskManager();
 
   const std::string configDirectoryPath_;
 
@@ -252,13 +258,13 @@ class PrestoServer {
   // Executor for HTTP request processing after dispatching
   std::unique_ptr<folly::CPUThreadPoolExecutor> httpSrvCpuExecutor_;
 
-  // Executor for query engine driver executions. The underlying thread pool 
-  // executor is a folly::CPUThreadPoolExecutor. The executor is stored as 
-  // abstract type to provide flexibility of thread pool monitoring. The 
-  // underlying folly::CPUThreadPoolExecutor can be obtained through 
+  // Executor for query engine driver executions. The underlying thread pool
+  // executor is a folly::CPUThreadPoolExecutor. The executor is stored as
+  // abstract type to provide flexibility of thread pool monitoring. The
+  // underlying folly::CPUThreadPoolExecutor can be obtained through
   // 'driverCpuExecutor()' method.
   std::unique_ptr<folly::Executor> driverExecutor_;
-  // Raw pointer pointing to the underlying folly::CPUThreadPoolExecutor of 
+  // Raw pointer pointing to the underlying folly::CPUThreadPoolExecutor of
   // 'driverExecutor_'.
   folly::CPUThreadPoolExecutor* driverCpuExecutor_;
 

@@ -97,6 +97,29 @@ If set to ``true``, disables the optimization in expression evaluation to delay 
 
 This should only be used for debugging purposes.
 
+``native_debug_memory_pool_name_regex``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+* **Type:** ``varchar``
+* **Default value:** ``""``
+
+Native Execution only. Regular expression pattern to match memory pool names for allocation callsite tracking.
+Matched pools will also perform leak checks at destruction. Empty string disables tracking.
+
+This should only be used for debugging purposes.
+
+``native_debug_memory_pool_warn_threshold_bytes``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+* **Type:** ``bigint``
+* **Default value:** ``0``
+
+Native Execution only. Warning threshold for memory pool allocations. Logs callsites when exceeded.
+Requires allocation tracking to be enabled with ``native_debug_memory_pool_name_regex``.
+Accepts B/KB/MB/GB units. Set to 0B to disable.
+
+This should only be used for debugging purposes.
+
 ``native_execution_type_rewrite_enabled``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -487,3 +510,50 @@ This is used in global arbitration victim selection.
 
 Maximum number of splits to listen to by the SplitListener per table scan node per
 native worker.
+
+``native_max_split_preload_per_driver``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+* **Type:** ``integer``
+* **Default value:** ``0``
+
+Maximum number of splits to preload per driver. Set to 0 to disable preloading.
+
+``native_index_lookup_join_max_prefetch_batches``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+* **Type:** ``integer``
+* **Default value:** ``0``
+
+Specifies the max number of input batches to prefetch to do index lookup ahead.
+If it is zero, then process one input batch at a time.
+
+``native_index_lookup_join_split_output``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+* **Type:** ``boolean``
+* **Default value:** ``true``
+
+If this is true, then the index join operator might split output for each input
+batch based on the output batch size control. Otherwise, it tries to produce a
+single output for each input batch.
+
+``native_unnest_split_output``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+* **Type:** ``boolean``
+* **Default value:** ``true``
+
+If this is true, then the unnest operator might split output for each input
+batch based on the output batch size control. Otherwise, it produces a single
+output for each input batch.
+
+``native_use_velox_geospatial_join``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+* **Type:** ``boolean``
+* **Default value:** ``true``
+
+If this is true, then the protocol::SpatialJoinNode is converted to a
+velox::core::SpatialJoinNode. Otherwise, it is converted to a
+velox::core::NestedLoopJoinNode.

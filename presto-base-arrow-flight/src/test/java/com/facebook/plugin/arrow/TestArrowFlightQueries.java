@@ -29,7 +29,6 @@ import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
 
 import java.io.File;
-import java.io.IOException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -37,6 +36,7 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 
+import static com.facebook.presto.common.type.BigintType.BIGINT;
 import static com.facebook.presto.common.type.CharType.createCharType;
 import static com.facebook.presto.common.type.DateType.DATE;
 import static com.facebook.presto.common.type.IntegerType.INTEGER;
@@ -53,28 +53,22 @@ public class TestArrowFlightQueries
         extends AbstractTestQueries
 {
     private static final Logger logger = Logger.get(TestArrowFlightQueries.class);
-    private final int serverPort;
+    private int serverPort;
     private RootAllocator allocator;
     private FlightServer server;
     private DistributedQueryRunner arrowFlightQueryRunner;
-
-    public TestArrowFlightQueries()
-            throws IOException
-    {
-        this.serverPort = ArrowFlightQueryRunner.findUnusedPort();
-    }
 
     @BeforeClass
     public void setup()
             throws Exception
     {
         arrowFlightQueryRunner = getDistributedQueryRunner();
-        File certChainFile = new File("src/test/resources/server.crt");
-        File privateKeyFile = new File("src/test/resources/server.key");
+        File certChainFile = new File("src/test/resources/certs/server.crt");
+        File privateKeyFile = new File("src/test/resources/certs/server.key");
 
         allocator = new RootAllocator(Long.MAX_VALUE);
         Location location = Location.forGrpcTls("localhost", serverPort);
-        server = FlightServer.builder(allocator, location, new TestingArrowProducer(allocator))
+        server = FlightServer.builder(allocator, location, new TestingArrowProducer(allocator, false))
                 .useTls(certChainFile, privateKeyFile)
                 .build();
 
@@ -95,6 +89,7 @@ public class TestArrowFlightQueries
     protected QueryRunner createQueryRunner()
             throws Exception
     {
+        serverPort = ArrowFlightQueryRunner.findUnusedPort();
         return ArrowFlightQueryRunner.createQueryRunner(serverPort);
     }
 
@@ -103,18 +98,18 @@ public class TestArrowFlightQueries
     {
         MaterializedResult actual = computeActual("SHOW COLUMNS FROM member");
 
-        MaterializedResult expectedUnparametrizedVarchar = resultBuilder(getSession(), VARCHAR, VARCHAR, VARCHAR, VARCHAR)
-                .row("id", "integer", "", "")
-                .row("name", "varchar", "", "")
-                .row("sex", "char", "", "")
-                .row("state", "char", "", "")
+        MaterializedResult expectedUnparametrizedVarchar = resultBuilder(getSession(), VARCHAR, VARCHAR, VARCHAR, VARCHAR, BIGINT, BIGINT, BIGINT)
+                .row("id", "integer", "", "", 10L, null, null)
+                .row("name", "varchar", "", "", null, null, 2147483647L)
+                .row("sex", "char", "", "", null, null, 2147483647L)
+                .row("state", "char", "", "", null, null, 2147483647L)
                 .build();
 
-        MaterializedResult expectedParametrizedVarchar = resultBuilder(getSession(), VARCHAR, VARCHAR, VARCHAR, VARCHAR)
-                .row("id", "integer", "", "")
-                .row("name", "varchar(50)", "", "")
-                .row("sex", "char(1)", "", "")
-                .row("state", "char(5)", "", "")
+        MaterializedResult expectedParametrizedVarchar = resultBuilder(getSession(), VARCHAR, VARCHAR, VARCHAR, VARCHAR, BIGINT, BIGINT, BIGINT)
+                .row("id", "integer", "", "", 10L, null, null)
+                .row("name", "varchar(50)", "", "", null, null, 50L)
+                .row("sex", "char(1)", "", "", null, null, 1L)
+                .row("state", "char(5)", "", "", null, null, 5L)
                 .build();
 
         assertTrue(actual.equals(expectedParametrizedVarchar) || actual.equals(expectedUnparametrizedVarchar),
@@ -163,10 +158,36 @@ public class TestArrowFlightQueries
     public void testDescribeUnknownTable()
     {
         MaterializedResult actualRows = computeActual("DESCRIBE information_schema.enabled_roles");
-        MaterializedResult expectedRows = resultBuilder(getSession(), VARCHAR, VARCHAR, VARCHAR, VARCHAR)
-                .row("role_name", "varchar", "", "")
+        MaterializedResult expectedRows = resultBuilder(getSession(),
+                VARCHAR, VARCHAR, VARCHAR, VARCHAR, BIGINT, BIGINT, BIGINT)
+                .row("role_name", "varchar", "", "", null, null, 2147483647L)
                 .build();
+
         assertEquals(actualRows, expectedRows);
+    }
+
+    @Test
+    public void testQueryFunctionWithRestrictedColumns()
+    {
+        assertQuery("SELECT NAME FROM TABLE(system.query_function('SELECT NATIONKEY, NAME FROM tpch.nation WHERE NATIONKEY = 4','NATIONKEY BIGINT, NAME VARCHAR'))", "SELECT NAME FROM nation WHERE NATIONKEY = 4");
+    }
+
+    @Test
+    public void testQueryFunctionWithoutRestrictedColumns()
+    {
+        assertQuery("SELECT NATIONKEY, NAME FROM TABLE(system.query_function('SELECT NATIONKEY, NAME FROM tpch.nation WHERE NATIONKEY = 4','NATIONKEY BIGINT, NAME VARCHAR'))", "SELECT NATIONKEY, NAME FROM nation WHERE NATIONKEY = 4");
+    }
+
+    @Test
+    public void testQueryFunctionWithDifferentColumnOrder()
+    {
+        assertQuery("SELECT NAME, NATIONKEY FROM TABLE(system.query_function('SELECT NATIONKEY, NAME FROM tpch.nation WHERE NATIONKEY = 4','NATIONKEY BIGINT, NAME VARCHAR'))", "SELECT NAME, NATIONKEY FROM nation WHERE NATIONKEY = 4");
+    }
+
+    @Test
+    public void testQueryFunctionWithInvalidColumn()
+    {
+        assertQueryFails("SELECT NAME, NATIONKEY, INVALID_COLUMN FROM TABLE(system.query_function('SELECT NATIONKEY, NAME FROM tpch.nation WHERE NATIONKEY = 4','NATIONKEY BIGINT, NAME VARCHAR'))", "Column 'invalid_column' cannot be resolved", true);
     }
 
     private LocalDate getDate(String dateString)

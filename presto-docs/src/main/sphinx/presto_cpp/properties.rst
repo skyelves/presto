@@ -75,6 +75,7 @@ alphabetical order.
     - Custom type names are peeled in the coordinator. Only the actual base type is preserved.
     - ``CAST(col AS EnumType<T>)`` is rewritten as ``CAST(col AS <T>)``.
     - ``ENUM_KEY(EnumType<T>)`` is rewritten as ``ELEMENT_AT(MAP(<T>, VARCHAR))``.
+
   This property can only be enabled with native execution.
 
 ``optimizer.optimize-hash-generation``
@@ -172,7 +173,7 @@ The configuration properties of Presto C++ workers are described here, in alphab
   worker node. Memory for system usage such as disk spilling and cache prefetch are
   not counted in it.
 
-``max_spill_bytes``
+``max-spill-bytes``
 ^^^^^^^^^^^^^^^^^^^
 
 * **Type:** ``integer``
@@ -559,6 +560,17 @@ Exchange Properties
 * **Default value:** ``10``
 
   Maximum wait time for exchange request in seconds.
+
+HTTP Client Properties
+----------------------
+
+``http-client.http2-enabled``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+* **Type:** ``boolean``
+* **Default value:** ``false``
+
+Specifies whether HTTP/2 should be enabled for HTTP client.
 
 Memory Checker Properties
 -------------------------

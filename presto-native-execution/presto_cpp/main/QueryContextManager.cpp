@@ -45,7 +45,8 @@ QueryContextManager::findOrCreateQueryCtx(
     const protocol::TaskUpdateRequest& taskUpdateRequest) {
   return findOrCreateQueryCtx(
       taskId,
-      toVeloxConfigs(taskUpdateRequest.session),
+      toVeloxConfigs(
+          taskUpdateRequest.session, taskUpdateRequest.extraCredentials),
       toConnectorConfigs(taskUpdateRequest));
 }
 
@@ -57,6 +58,24 @@ bool QueryContextManager::queryHasStartedTasks(
 void QueryContextManager::setQueryHasStartedTasks(
     const protocol::TaskId& taskId) {
   queryContextCache_.wlock()->setHasStartedTasks(queryIdFromTaskId(taskId));
+}
+
+std::shared_ptr<core::QueryCtx> QueryContextManager::createAndCacheQueryCtx(
+    QueryContextCache& cache,
+    const QueryId& queryId,
+    velox::core::QueryConfig&& queryConfig,
+    std::unordered_map<std::string, std::shared_ptr<config::ConfigBase>>&&
+        connectorConfigs,
+    std::shared_ptr<memory::MemoryPool>&& pool) {
+  auto queryCtx = core::QueryCtx::create(
+      driverExecutor_,
+      std::move(queryConfig),
+      std::move(connectorConfigs),
+      cache::AsyncDataCache::getInstance(),
+      std::move(pool),
+      spillerExecutor_,
+      queryId);
+  return cache.insert(queryId, std::move(queryCtx));
 }
 
 std::shared_ptr<core::QueryCtx> QueryContextManager::findOrCreateQueryCtx(
@@ -79,10 +98,12 @@ std::shared_ptr<core::QueryCtx> QueryContextManager::findOrCreateQueryCtx(
   // is still indexed by the query id.
   static std::atomic_uint64_t poolId{0};
   std::optional<memory::MemoryPool::DebugOptions> poolDbgOpts;
-  const auto debugMemoryPoolNameRegex = queryConfig.debugMemoryPoolNameRegex();
+  auto debugMemoryPoolNameRegex = queryConfig.debugMemoryPoolNameRegex();
   if (!debugMemoryPoolNameRegex.empty()) {
     poolDbgOpts = memory::MemoryPool::DebugOptions{
-        .debugPoolNameRegex = debugMemoryPoolNameRegex};
+        .debugPoolNameRegex = std::move(debugMemoryPoolNameRegex),
+        .debugPoolWarnThresholdBytes =
+            queryConfig.debugMemoryPoolWarnThresholdBytes()};
   }
   auto pool = memory::MemoryManager::getInstance()->addRootPool(
       fmt::format("{}_{}", queryId, poolId++),
@@ -90,16 +111,12 @@ std::shared_ptr<core::QueryCtx> QueryContextManager::findOrCreateQueryCtx(
       nullptr,
       poolDbgOpts);
 
-  auto queryCtx = core::QueryCtx::create(
-      driverExecutor_,
+  return createAndCacheQueryCtx(
+      *lockedCache,
+      queryId,
       std::move(queryConfig),
       std::move(connectorConfigs),
-      cache::AsyncDataCache::getInstance(),
-      std::move(pool),
-      spillerExecutor_,
-      queryId);
-
-  return lockedCache->insert(queryId, std::move(queryCtx));
+      std::move(pool));
 }
 
 void QueryContextManager::visitAllContexts(

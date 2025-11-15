@@ -14,6 +14,7 @@
 package com.facebook.presto.sql.planner.iterative.rule.test;
 
 import com.facebook.presto.Session;
+import com.facebook.presto.common.QualifiedObjectName;
 import com.facebook.presto.common.block.SortOrder;
 import com.facebook.presto.common.function.OperatorType;
 import com.facebook.presto.common.predicate.TupleDomain;
@@ -38,6 +39,7 @@ import com.facebook.presto.spi.plan.DistinctLimitNode;
 import com.facebook.presto.spi.plan.EquiJoinClause;
 import com.facebook.presto.spi.plan.ExceptNode;
 import com.facebook.presto.spi.plan.FilterNode;
+import com.facebook.presto.spi.plan.IndexJoinNode;
 import com.facebook.presto.spi.plan.IndexSourceNode;
 import com.facebook.presto.spi.plan.IntersectNode;
 import com.facebook.presto.spi.plan.JoinDistributionType;
@@ -45,6 +47,7 @@ import com.facebook.presto.spi.plan.JoinNode;
 import com.facebook.presto.spi.plan.JoinType;
 import com.facebook.presto.spi.plan.LimitNode;
 import com.facebook.presto.spi.plan.MarkDistinctNode;
+import com.facebook.presto.spi.plan.MaterializedViewScanNode;
 import com.facebook.presto.spi.plan.Ordering;
 import com.facebook.presto.spi.plan.OrderingScheme;
 import com.facebook.presto.spi.plan.OutputNode;
@@ -80,7 +83,6 @@ import com.facebook.presto.sql.planner.plan.AssignUniqueId;
 import com.facebook.presto.sql.planner.plan.EnforceSingleRowNode;
 import com.facebook.presto.sql.planner.plan.ExchangeNode;
 import com.facebook.presto.sql.planner.plan.GroupIdNode;
-import com.facebook.presto.sql.planner.plan.IndexJoinNode;
 import com.facebook.presto.sql.planner.plan.LateralJoinNode;
 import com.facebook.presto.sql.planner.plan.OffsetNode;
 import com.facebook.presto.sql.planner.plan.RemoteSourceNode;
@@ -1087,5 +1089,24 @@ public class PlanBuilder
                 groupingColumns,
                 aggregationArguments,
                 groupIdSymbol);
+    }
+
+    public MaterializedViewScanNode materializedViewScan(
+            QualifiedObjectName materializedViewName,
+            PlanNode dataTablePlan,
+            PlanNode viewQueryPlan,
+            Map<VariableReferenceExpression, VariableReferenceExpression> dataTableMappings,
+            Map<VariableReferenceExpression, VariableReferenceExpression> viewQueryMappings,
+            VariableReferenceExpression... outputVariables)
+    {
+        return new MaterializedViewScanNode(
+                Optional.empty(),
+                idAllocator.getNextId(),
+                dataTablePlan,
+                viewQueryPlan,
+                materializedViewName,
+                dataTableMappings,
+                viewQueryMappings,
+                ImmutableList.copyOf(outputVariables));
     }
 }

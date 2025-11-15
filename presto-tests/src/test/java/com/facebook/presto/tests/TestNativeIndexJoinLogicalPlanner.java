@@ -15,11 +15,11 @@ package com.facebook.presto.tests;
 
 import com.facebook.presto.Session;
 import com.facebook.presto.spi.ColumnHandle;
+import com.facebook.presto.spi.plan.IndexJoinNode;
 import com.facebook.presto.spi.plan.IndexSourceNode;
 import com.facebook.presto.spi.plan.PlanNode;
 import com.facebook.presto.spi.relation.VariableReferenceExpression;
 import com.facebook.presto.sql.planner.assertions.PlanMatchPattern;
-import com.facebook.presto.sql.planner.plan.IndexJoinNode;
 import com.facebook.presto.testing.QueryRunner;
 import com.facebook.presto.tests.tpch.IndexedTpchPlugin;
 import com.facebook.presto.tpch.TpchColumnHandle;
@@ -81,7 +81,7 @@ public class TestNativeIndexJoinLogicalPlanner
                             "  FROM lineitem\n" +
                             "  WHERE partkey % 8 = 0) l\n" +
                             joinType + " JOIN orders o\n" +
-                            "  ON l.orderkey = o.orderkey",
+                            "  ON l.orderkey = o.orderkey\n",
                     anyTree(indexJoin(
                             filter(tableScan("lineitem")),
                             indexSource("orders"))));
@@ -94,7 +94,7 @@ public class TestNativeIndexJoinLogicalPlanner
                             "  WHERE partkey % 8 = 0) l\n" +
                             joinType + " JOIN orders o\n" +
                             "  ON l.orderkey = o.orderkey\n" +
-                            "  AND l.orderstatus = o.orderstatus",
+                            "  AND l.orderstatus = o.orderstatus\n",
                     anyTree(indexJoin(
                             project(filter(tableScan("lineitem"))),
                             indexSource("orders"))));
@@ -107,7 +107,7 @@ public class TestNativeIndexJoinLogicalPlanner
                             "  WHERE partkey % 8 = 0) l\n" +
                             joinType + " JOIN orders o\n" +
                             "  ON l.orderkey = o.orderkey\n" +
-                            "  AND o.custkey = 100",
+                            "  AND o.custkey = 100\n",
                     anyTree(indexJoin(
                             project(filter(tableScan("lineitem"))),
                             filter(indexSource("orders")))));
@@ -125,8 +125,8 @@ public class TestNativeIndexJoinLogicalPlanner
                             "  FROM lineitem\n" +
                             "  WHERE partkey % 8 = 0) l\n" +
                             joinType + " JOIN orders o\n" +
-                            "  ON l.orderkey = o.orderkey" +
-                            "  AND o.custkey BETWEEN 1 AND l.partkey",
+                            "  ON l.orderkey = o.orderkey\n" +
+                            "  AND o.custkey BETWEEN 1 AND l.partkey\n",
                     anyTree(indexJoin(
                             filter(tableScan("lineitem")),
                             indexSource("orders"))));
@@ -138,8 +138,8 @@ public class TestNativeIndexJoinLogicalPlanner
                             "  FROM lineitem\n" +
                             "  WHERE partkey % 8 = 0) l\n" +
                             joinType + " JOIN orders o\n" +
-                            "  ON l.orderkey = o.orderkey" +
-                            "  AND CONTAINS(ARRAY[1, l.partkey, 3], o.custkey)",
+                            "  ON l.orderkey = o.orderkey\n" +
+                            "  AND CONTAINS(ARRAY[1, l.partkey, 3], o.custkey\n)",
                     anyTree(indexJoin(
                             filter(tableScan("lineitem")),
                             indexSource("orders"))));
@@ -151,8 +151,8 @@ public class TestNativeIndexJoinLogicalPlanner
                             "  FROM lineitem\n" +
                             "  WHERE partkey % 8 = 0) l\n" +
                             joinType + " JOIN orders o\n" +
-                            "  ON l.orderkey = o.orderkey" +
-                            "  AND o.custkey BETWEEN 1 AND 100",
+                            "  ON l.orderkey = o.orderkey\n" +
+                            "  AND o.custkey BETWEEN 1 AND 100\n",
                     anyTree(indexJoin(
                             filter(tableScan("lineitem")),
                             filter(indexSource("orders")))));
@@ -164,8 +164,21 @@ public class TestNativeIndexJoinLogicalPlanner
                             "  FROM lineitem\n" +
                             "  WHERE partkey % 8 = 0) l\n" +
                             joinType + " JOIN orders o\n" +
-                            "  ON l.orderkey = o.orderkey" +
-                            "  AND CONTAINS(ARRAY[1, 2, 3], o.custkey)",
+                            "  ON l.orderkey = o.orderkey\n" +
+                            "  AND CONTAINS(ARRAY[1, 2, 3], o.custkey)\n",
+                    anyTree(indexJoin(
+                            filter(tableScan("lineitem")),
+                            filter(indexSource("orders")))));
+
+            assertPlan("" +
+                            "SELECT *\n" +
+                            "FROM (\n" +
+                            "  SELECT *\n" +
+                            "  FROM lineitem\n" +
+                            "  WHERE partkey % 8 = 0) l\n" +
+                            joinType + " JOIN orders o\n" +
+                            "  ON l.orderkey = o.orderkey\n" +
+                            "  AND o.custkey % 100 = 0\n",
                     anyTree(indexJoin(
                             filter(tableScan("lineitem")),
                             filter(indexSource("orders")))));
@@ -182,7 +195,7 @@ public class TestNativeIndexJoinLogicalPlanner
                 "  ) \n" +
                 "FROM lineitem l\n" +
                 "JOIN orders_extra o\n" +
-                "  ON l.orderkey = o.orderkey";
+                "  ON l.orderkey = o.orderkey\n";
         PlanMatchPattern expectedQueryPlan = output(
                 project(
                         indexJoin(

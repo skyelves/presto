@@ -29,6 +29,7 @@ import org.apache.iceberg.TableProperties;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 
@@ -44,6 +45,9 @@ import static com.google.common.collect.ImmutableMap.toImmutableMap;
 import static java.lang.String.format;
 import static java.util.Locale.ENGLISH;
 import static org.apache.iceberg.TableProperties.COMMIT_NUM_RETRIES;
+import static org.apache.iceberg.TableProperties.HIVE_LOCK_ENABLED;
+import static org.apache.iceberg.TableProperties.METADATA_DELETE_AFTER_COMMIT_ENABLED;
+import static org.apache.iceberg.TableProperties.METRICS_MAX_INFERRED_COLUMN_DEFAULTS;
 import static org.apache.iceberg.TableProperties.UPDATE_MODE;
 import static org.apache.iceberg.TableProperties.WRITE_DATA_LOCATION;
 
@@ -99,14 +103,19 @@ public class IcebergTableProperties
             .put(COMMIT_RETRIES, TableProperties.COMMIT_NUM_RETRIES)
             .put(DELETE_MODE, TableProperties.DELETE_MODE)
             .put(METADATA_PREVIOUS_VERSIONS_MAX, TableProperties.METADATA_PREVIOUS_VERSIONS_MAX)
-            .put(METADATA_DELETE_AFTER_COMMIT, TableProperties.METADATA_DELETE_AFTER_COMMIT_ENABLED)
-            .put(METRICS_MAX_INFERRED_COLUMN, TableProperties.METRICS_MAX_INFERRED_COLUMN_DEFAULTS)
+            .put(METADATA_DELETE_AFTER_COMMIT, METADATA_DELETE_AFTER_COMMIT_ENABLED)
+            .put(METRICS_MAX_INFERRED_COLUMN, METRICS_MAX_INFERRED_COLUMN_DEFAULTS)
             .build();
 
     private static final Set<String> UPDATABLE_PROPERTIES = ImmutableSet.<String>builder()
             .add(COMMIT_RETRIES)
             .add(COMMIT_NUM_RETRIES)
             .add(TARGET_SPLIT_SIZE)
+            .add(METADATA_DELETE_AFTER_COMMIT)
+            .add(METADATA_DELETE_AFTER_COMMIT_ENABLED)
+            .add(METADATA_PREVIOUS_VERSIONS_MAX)
+            .add(HIVE_LOCK_ENABLED)
+            .add(TableProperties.METADATA_PREVIOUS_VERSIONS_MAX)
             .build();
 
     private static final String DEFAULT_FORMAT_VERSION = "2";
@@ -183,14 +192,19 @@ public class IcebergTableProperties
                         icebergConfig.getMetadataPreviousVersionsMax(),
                         false))
                 .add(booleanProperty(
-                        TableProperties.METADATA_DELETE_AFTER_COMMIT_ENABLED,
+                        METADATA_DELETE_AFTER_COMMIT_ENABLED,
                         "Whether enables to delete the oldest metadata file after commit",
                         icebergConfig.isMetadataDeleteAfterCommit(),
                         false))
                 .add(integerProperty(
-                        TableProperties.METRICS_MAX_INFERRED_COLUMN_DEFAULTS,
+                        METRICS_MAX_INFERRED_COLUMN_DEFAULTS,
                         "The maximum number of columns for which metrics are collected",
                         icebergConfig.getMetricsMaxInferredColumn(),
+                        false))
+                .add(booleanProperty(
+                        HIVE_LOCK_ENABLED,
+                        "Whether to enable hive locks",
+                        null,
                         false))
                 .add(new PropertyMetadata<>(
                         UPDATE_MODE,
@@ -225,11 +239,19 @@ public class IcebergTableProperties
                 .addAll(deprecatedPropertyMetadata.values().iterator())
                 .build();
 
-        columnProperties = ImmutableList.of(stringProperty(
-                PARTITIONING_PROPERTY,
-                "This column's partition transform",
-                null,
-                false));
+        columnProperties = ImmutableList.of(
+                new PropertyMetadata<>(
+                        PARTITIONING_PROPERTY,
+                        "This column's partition transforms, supports both string expressions (e.g., 'bucket(4)') and array expressions (e.g. ARRAY['bucket(4)', 'identity'])",
+                        new ArrayType(VARCHAR),
+                        List.class,
+                        ImmutableList.of(),
+                        false,
+                        value -> ((Collection<?>) value).stream()
+                                .map(name -> ((String) name).toLowerCase(ENGLISH))
+                                .collect(toImmutableList()),
+                        value -> value)
+                        .withAdditionalTypeHandler(VARCHAR, ImmutableList::of));
     }
 
     public List<PropertyMetadata<?>> getTableProperties()
@@ -242,7 +264,7 @@ public class IcebergTableProperties
         return columnProperties;
     }
 
-    public Set<String> getUpdatableProperties()
+    public static Set<String> getUpdatableProperties()
     {
         return UPDATABLE_PROPERTIES;
     }
@@ -251,7 +273,7 @@ public class IcebergTableProperties
      * @return a map of deprecated property name to new property name, or null if the property is
      * removed entirely.
      */
-    public Map<String, String> getDeprecatedProperties()
+    public static Map<String, String> getDeprecatedProperties()
     {
         return DEPRECATED_PROPERTIES;
     }
@@ -262,20 +284,20 @@ public class IcebergTableProperties
     }
 
     @SuppressWarnings("unchecked")
-    public List<String> getPartitioning(Map<String, Object> tableProperties)
+    public static List<String> getPartitioning(Map<String, Object> tableProperties)
     {
         List<String> partitioning = (List<String>) tableProperties.get(PARTITIONING_PROPERTY);
         return partitioning == null ? ImmutableList.of() : ImmutableList.copyOf(partitioning);
     }
 
     @SuppressWarnings("unchecked")
-    public List<String> getSortOrder(Map<String, Object> tableProperties)
+    public static List<String> getSortOrder(Map<String, Object> tableProperties)
     {
         List<String> sortedBy = (List<String>) tableProperties.get(SORTED_BY_PROPERTY);
         return sortedBy == null ? ImmutableList.of() : ImmutableList.copyOf(sortedBy);
     }
 
-    public String getTableLocation(Map<String, Object> tableProperties)
+    public static String getTableLocation(Map<String, Object> tableProperties)
     {
         return (String) tableProperties.get(LOCATION_PROPERTY);
     }
@@ -283,6 +305,10 @@ public class IcebergTableProperties
     public static String getWriteDataLocation(Map<String, Object> tableProperties)
     {
         return (String) tableProperties.get(WRITE_DATA_LOCATION);
+    }
+    public static Optional<String> isHiveLocksEnabled(Map<String, Object> tableProperties)
+    {
+        return tableProperties.containsKey(HIVE_LOCK_ENABLED) ? Optional.of(String.valueOf(tableProperties.get(HIVE_LOCK_ENABLED))) : Optional.empty();
     }
 
     public String getFormatVersion(ConnectorSession session, Map<String, Object> tableProperties)
@@ -307,12 +333,12 @@ public class IcebergTableProperties
 
     public Boolean isMetadataDeleteAfterCommit(ConnectorSession session, Map<String, Object> tableProperties)
     {
-        return (Boolean) getTablePropertyWithDeprecationWarning(session, tableProperties, TableProperties.METADATA_DELETE_AFTER_COMMIT_ENABLED);
+        return (Boolean) getTablePropertyWithDeprecationWarning(session, tableProperties, METADATA_DELETE_AFTER_COMMIT_ENABLED);
     }
 
     public Integer getMetricsMaxInferredColumn(ConnectorSession session, Map<String, Object> tableProperties)
     {
-        return (Integer) getTablePropertyWithDeprecationWarning(session, tableProperties, TableProperties.METRICS_MAX_INFERRED_COLUMN_DEFAULTS);
+        return (Integer) getTablePropertyWithDeprecationWarning(session, tableProperties, METRICS_MAX_INFERRED_COLUMN_DEFAULTS);
     }
 
     public RowLevelOperationMode getUpdateMode(Map<String, Object> tableProperties)

@@ -25,16 +25,9 @@ namespace facebook::presto::test {
 
 void ArrowFlightConnectorTestBase::SetUp() {
   OperatorTestBase::SetUp();
-
-  if (!velox::connector::hasConnectorFactory(
-          presto::ArrowFlightConnectorFactory::kArrowFlightConnectorName)) {
-    velox::connector::registerConnectorFactory(
-        std::make_shared<presto::ArrowFlightConnectorFactory>());
-  }
+  presto::ArrowFlightConnectorFactory factory;
   velox::connector::registerConnector(
-      velox::connector::getConnectorFactory(
-          ArrowFlightConnectorFactory::kArrowFlightConnectorName)
-          ->newConnector(kFlightConnectorId, config_));
+      factory.newConnector(kFlightConnectorId, config_));
 
   ArrowFlightConfig config(config_);
   if (config.defaultServerPort().has_value()) {
@@ -85,8 +78,9 @@ ArrowFlightConnectorTestBase::makeSplits(
     AFC_ASSIGN_OR_RAISE(
         auto flightEndpointStr, flightEndpoint.SerializeToString());
     auto flightEndpointBytes = folly::base64Encode(flightEndpointStr);
-    splits.push_back(std::make_shared<ArrowFlightSplit>(
-        kFlightConnectorId, flightEndpointBytes));
+    splits.push_back(
+        std::make_shared<ArrowFlightSplit>(
+            kFlightConnectorId, flightEndpointBytes));
   }
   return splits;
 }

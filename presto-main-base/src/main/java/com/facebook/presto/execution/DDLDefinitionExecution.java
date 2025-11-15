@@ -24,6 +24,7 @@ import com.facebook.presto.sql.analyzer.BuiltInQueryPreparer;
 import com.facebook.presto.sql.tree.Expression;
 import com.facebook.presto.sql.tree.Statement;
 import com.facebook.presto.transaction.TransactionManager;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.util.concurrent.ListenableFuture;
 import jakarta.inject.Inject;
 
@@ -61,6 +62,8 @@ public class DDLDefinitionExecution<T extends Statement>
     @Override
     protected ListenableFuture<?> executeTask()
     {
+        accessControl.checkQueryIntegrity(stateMachine.getSession().getIdentity(), stateMachine.getSession().getAccessControlContext(), query, ImmutableMap.of(), ImmutableMap.of());
+
         return task.execute(statement, transactionManager, metadata, accessControl, stateMachine.getSession(), parameters, stateMachine.getWarningCollector(), query);
     }
 
@@ -100,6 +103,8 @@ public class DDLDefinitionExecution<T extends Statement>
             //TODO: PreparedQuery should be passed all the way to analyzer
             checkState(preparedQuery instanceof BuiltInQueryPreparer.BuiltInPreparedQuery, "Unsupported prepared query type: %s", preparedQuery.getClass().getSimpleName());
             BuiltInQueryPreparer.BuiltInPreparedQuery builtInQueryPreparer = (BuiltInQueryPreparer.BuiltInPreparedQuery) preparedQuery;
+            Statement statement = builtInQueryPreparer.getStatement();
+            stateMachine.setUpdateInfo(statement.getUpdateInfo());
 
             return createDDLDefinitionExecution(builtInQueryPreparer.getStatement(), builtInQueryPreparer.getParameters(), stateMachine, slug, retryCount, query);
         }
@@ -116,7 +121,6 @@ public class DDLDefinitionExecution<T extends Statement>
             DDLDefinitionTask<T> task = (DDLDefinitionTask<T>) tasks.get(statement.getClass());
             checkArgument(task != null, "no task for statement: %s", statement.getClass().getSimpleName());
 
-            stateMachine.setUpdateType(task.getName());
             return new DDLDefinitionExecution<>(task, statement, slug, retryCount, transactionManager, metadata, accessControl, stateMachine, parameters, query);
         }
     }

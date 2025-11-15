@@ -46,6 +46,7 @@ import com.facebook.presto.spi.plan.DistinctLimitNode;
 import com.facebook.presto.spi.plan.EquiJoinClause;
 import com.facebook.presto.spi.plan.ExceptNode;
 import com.facebook.presto.spi.plan.FilterNode;
+import com.facebook.presto.spi.plan.IndexJoinNode;
 import com.facebook.presto.spi.plan.IndexSourceNode;
 import com.facebook.presto.spi.plan.IntersectNode;
 import com.facebook.presto.spi.plan.JoinNode;
@@ -89,7 +90,6 @@ import com.facebook.presto.sql.planner.plan.EnforceSingleRowNode;
 import com.facebook.presto.sql.planner.plan.ExchangeNode;
 import com.facebook.presto.sql.planner.plan.ExplainAnalyzeNode;
 import com.facebook.presto.sql.planner.plan.GroupIdNode;
-import com.facebook.presto.sql.planner.plan.IndexJoinNode;
 import com.facebook.presto.sql.planner.plan.InternalPlanVisitor;
 import com.facebook.presto.sql.planner.plan.LateralJoinNode;
 import com.facebook.presto.sql.planner.plan.OffsetNode;
@@ -98,6 +98,7 @@ import com.facebook.presto.sql.planner.plan.RowNumberNode;
 import com.facebook.presto.sql.planner.plan.SampleNode;
 import com.facebook.presto.sql.planner.plan.SequenceNode;
 import com.facebook.presto.sql.planner.plan.StatisticsWriterNode;
+import com.facebook.presto.sql.planner.plan.TableFunctionNode;
 import com.facebook.presto.sql.planner.plan.TableWriterMergeNode;
 import com.facebook.presto.sql.planner.plan.TopNRowNumberNode;
 import com.facebook.presto.sql.planner.plan.UpdateNode;
@@ -435,6 +436,9 @@ public class PlanPrinter
                     Joiner.on(", ").join(partitioningScheme.getPartitioning().getArguments()),
                     formatHash(partitioningScheme.getHashColumn())));
         }
+        if (fragment.getOutputOrderingScheme().isPresent()) {
+            builder.append(indentString(1)).append(format("Output ordering: %s%n", fragment.getOutputOrderingScheme()));
+        }
         builder.append(indentString(1)).append(format("Output encoding: %s%n", fragment.getPartitioningScheme().getEncoding()));
         builder.append(indentString(1)).append(format("Stage Execution Strategy: %s%n", fragment.getStageExecutionDescriptor().getStageExecutionStrategy()));
 
@@ -466,6 +470,7 @@ public class PlanPrinter
                 SINGLE_DISTRIBUTION,
                 ImmutableList.of(plan.getId()),
                 new PartitioningScheme(Partitioning.create(SINGLE_DISTRIBUTION, ImmutableList.of()), plan.getOutputVariables()),
+                Optional.empty(),
                 StageExecutionDescriptor.ungroupedExecution(),
                 false,
                 Optional.of(estimatedStatsAndCosts),
@@ -587,6 +592,10 @@ public class PlanPrinter
                     format("[%s, lookup = %s]", node.getIndexHandle(), node.getLookupVariables()));
 
             nodeOutput.appendDetailsLine("TableHandle: %s", node.getTableHandle().getConnectorHandle().toString());
+
+            Optional<ConnectorTableLayoutHandle> tableLayoutHandle = node.getTableHandle().getLayout();
+            tableLayoutHandle.ifPresent(
+                    connectorTableLayoutHandle -> nodeOutput.appendDetailsLine("TableHandleLayout: %s", connectorTableLayoutHandle.toString()));
 
             for (Map.Entry<VariableReferenceExpression, ColumnHandle> entry : node.getAssignments().entrySet()) {
                 if (node.getOutputVariables().contains(entry.getKey())) {
@@ -1127,9 +1136,15 @@ public class PlanPrinter
         @Override
         public Void visitRemoteSource(RemoteSourceNode node, Void context)
         {
+            String nodeName = "RemoteSource";
+            String orderingSchemStr = "";
+            if (node.getOrderingScheme().isPresent()) {
+                orderingSchemStr = node.getOrderingScheme().toString();
+                nodeName = "RemoteMerge";
+            }
             addNode(node,
-                    format("Remote%s", node.getOrderingScheme().isPresent() ? "Merge" : "Source"),
-                    format("[%s]", Joiner.on(',').join(node.getSourceFragmentIds())),
+                    format("%s", nodeName),
+                    format("[%s] %s", Joiner.on(',').join(node.getSourceFragmentIds()), orderingSchemStr),
                     ImmutableList.of(),
                     ImmutableList.of(),
                     node.getSourceFragmentIds());
@@ -1313,6 +1328,20 @@ public class PlanPrinter
         public Void visitOffset(OffsetNode node, Void context)
         {
             addNode(node, "Offset", format("[%s]", node.getCount()));
+            return processChildren(node, context);
+        }
+
+        @Override
+        public Void visitTableFunction(TableFunctionNode node, Void context)
+        {
+            NodeRepresentation nodeOutput = addNode(
+                    node,
+                    "TableFunction",
+                    node.getName());
+
+            checkArgument(
+                    node.getSources().isEmpty() && node.getTableArgumentProperties().isEmpty(),
+                    "Table or descriptor arguments are not yet supported in PlanPrinter");
 
             return processChildren(node, context);
         }

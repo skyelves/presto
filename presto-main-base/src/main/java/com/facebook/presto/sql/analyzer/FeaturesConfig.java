@@ -22,8 +22,10 @@ import com.facebook.airlift.units.Duration;
 import com.facebook.airlift.units.MaxDataSize;
 import com.facebook.presto.CompressionCodec;
 import com.facebook.presto.common.function.OperatorType;
+import com.facebook.presto.common.resourceGroups.QueryType;
+import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.function.FunctionMetadata;
-import com.facebook.presto.sql.tree.CreateView;
+import com.facebook.presto.spi.security.ViewSecurity;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
@@ -36,18 +38,22 @@ import jakarta.validation.constraints.NotNull;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
+import java.util.stream.Stream;
 
 import static com.facebook.airlift.units.DataSize.Unit.KILOBYTE;
 import static com.facebook.airlift.units.DataSize.Unit.MEGABYTE;
+import static com.facebook.presto.spi.StandardErrorCode.INVALID_SESSION_PROPERTY;
+import static com.facebook.presto.spi.security.ViewSecurity.DEFINER;
 import static com.facebook.presto.sql.analyzer.FeaturesConfig.AggregationPartitioningMergingStrategy.LEGACY;
 import static com.facebook.presto.sql.analyzer.FeaturesConfig.JoinNotNullInferenceStrategy.NONE;
 import static com.facebook.presto.sql.analyzer.FeaturesConfig.TaskSpillingStrategy.ORDER_BY_CREATE_TIME;
 import static com.facebook.presto.sql.expressions.ExpressionOptimizerManager.DEFAULT_EXPRESSION_OPTIMIZER_NAME;
-import static com.facebook.presto.sql.tree.CreateView.Security.DEFINER;
 import static com.google.common.collect.ImmutableList.toImmutableList;
+import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.SECONDS;
+import static java.util.stream.Collectors.joining;
 
 @DefunctConfig({
         "resource-group-manager",
@@ -106,6 +112,7 @@ public class FeaturesConfig
     private boolean logPlansUsedInHistoryBasedOptimizer;
     private boolean enforceTimeoutForHBOQueryRegistration;
     private boolean historyBasedOptimizerEstimateSizeUsingVariables;
+    private List<QueryType> queryTypesEnabledForHbo = ImmutableList.of(QueryType.SELECT, QueryType.INSERT);
     private boolean redistributeWrites;
     private boolean scaleWriters = true;
     private DataSize writerMinSize = new DataSize(32, MEGABYTE);
@@ -185,6 +192,7 @@ public class FeaturesConfig
 
     private boolean listBuiltInFunctionsOnly = true;
     private boolean experimentalFunctionsEnabled;
+    private boolean useConnectorProvidedSerializationCodecs;
     private boolean optimizeCommonSubExpressions = true;
     private boolean preferDistributedUnion = true;
     private boolean optimizeNullsInJoin;
@@ -218,6 +226,9 @@ public class FeaturesConfig
     private boolean materializedViewDataConsistencyEnabled = true;
     private boolean materializedViewPartitionFilteringEnabled = true;
     private boolean queryOptimizationWithMaterializedViewEnabled;
+    private boolean legacyMaterializedViewRefresh = true;
+    private boolean allowLegacyMaterializedViewsToggle;
+    private boolean materializedViewAllowFullRefreshEnabled;
 
     private AggregationIfToFilterRewriteStrategy aggregationIfToFilterRewriteStrategy = AggregationIfToFilterRewriteStrategy.DISABLED;
     private String analyzerType = "BUILTIN";
@@ -227,6 +238,7 @@ public class FeaturesConfig
     private boolean streamingForPartialAggregationEnabled;
     private boolean preferMergeJoinForSortedInputs;
     private boolean preferSortMergeJoin;
+    private boolean isSortedExchangeEnabled;
     private boolean segmentedAggregationEnabled;
 
     private int maxStageCountForEagerScheduling = 25;
@@ -245,6 +257,7 @@ public class FeaturesConfig
     private boolean nativeEnforceJoinBuildInputPartition = true;
     private boolean randomizeOuterJoinNullKey;
     private RandomizeOuterJoinNullKeyStrategy randomizeOuterJoinNullKeyStrategy = RandomizeOuterJoinNullKeyStrategy.DISABLED;
+    private RandomizeNullSourceKeyInSemiJoinStrategy randomizeNullSourceKeyInSemiJoinStrategy = RandomizeNullSourceKeyInSemiJoinStrategy.DISABLED;
     private ShardedJoinStrategy shardedJoinStrategy = ShardedJoinStrategy.DISABLED;
     private int joinShardCount = 100;
     private boolean isOptimizeConditionalAggregationEnabled;
@@ -285,7 +298,7 @@ public class FeaturesConfig
     private boolean generateDomainFilters;
     private boolean printEstimatedStatsFromCache;
     private boolean removeCrossJoinWithSingleConstantRow = true;
-    private CreateView.Security defaultViewSecurityMode = DEFINER;
+    private ViewSecurity defaultViewSecurityMode = DEFINER;
     private boolean useHistograms;
 
     private boolean isInlineProjectionsOnValuesEnabled;
@@ -309,6 +322,9 @@ public class FeaturesConfig
     private boolean addDistinctBelowSemiJoinBuild;
     private boolean pushdownSubfieldForMapFunctions = true;
     private long maxSerializableObjectSize = 1000;
+    private boolean utilizeUniquePropertyInQueryPlanning = true;
+
+    private boolean builtInSidecarFunctionsEnabled;
 
     public enum PartitioningPrecisionStrategy
     {
@@ -408,6 +424,12 @@ public class FeaturesConfig
         DISABLED,
         KEY_FROM_OUTER_JOIN, // Enabled only when join keys are from output of outer joins
         COST_BASED,
+        ALWAYS
+    }
+
+    public enum RandomizeNullSourceKeyInSemiJoinStrategy
+    {
+        DISABLED,
         ALWAYS
     }
 
@@ -866,6 +888,33 @@ public class FeaturesConfig
     {
         this.historyBasedOptimizerPlanCanonicalizationStrategies = historyBasedOptimizerPlanCanonicalizationStrategies;
         return this;
+    }
+
+    @NotNull
+    public List<QueryType> getQueryTypesEnabledForHbo()
+    {
+        return queryTypesEnabledForHbo;
+    }
+
+    @Config("optimizer.query-types-enabled-for-hbo")
+    public FeaturesConfig setQueryTypesEnabledForHbo(String queryTypesEnabledForHbo)
+    {
+        this.queryTypesEnabledForHbo = parseQueryTypesFromString(queryTypesEnabledForHbo);
+        return this;
+    }
+
+    public static List<QueryType> parseQueryTypesFromString(String queryTypes)
+    {
+        try {
+            return Splitter.on(",").trimResults().splitToList(queryTypes).stream()
+                    .map(QueryType::valueOf).collect(toImmutableList());
+        }
+        catch (Exception e) {
+            throw new PrestoException(INVALID_SESSION_PROPERTY, format("Allowed options for query_types_enabled_for_history_based_optimization are: %s",
+                    Stream.of(QueryType.values())
+                            .map(QueryType::name)
+                            .collect(joining(","))));
+        }
     }
 
     public boolean isLogPlansUsedInHistoryBasedOptimizer()
@@ -1800,6 +1849,19 @@ public class FeaturesConfig
         return this;
     }
 
+    public boolean isUseConnectorProvidedSerializationCodecs()
+    {
+        return useConnectorProvidedSerializationCodecs;
+    }
+
+    @Config("use-connector-provided-serialization-codecs")
+    @ConfigDescription("Enable use of custom connector-provided serialization codecs for handles")
+    public FeaturesConfig setUseConnectorProvidedSerializationCodecs(boolean useConnectorProvidedSerializationCodecs)
+    {
+        this.useConnectorProvidedSerializationCodecs = useConnectorProvidedSerializationCodecs;
+        return this;
+    }
+
     public boolean isOptimizeCommonSubExpressions()
     {
         return optimizeCommonSubExpressions;
@@ -2110,6 +2172,46 @@ public class FeaturesConfig
         return this;
     }
 
+    public boolean isLegacyMaterializedViews()
+    {
+        return legacyMaterializedViewRefresh;
+    }
+
+    @Config("experimental.legacy-materialized-views")
+    @ConfigDescription("Experimental: Use legacy materialized views.  This feature is under active development and may change" +
+            "or be removed at any time.  Do not disable in production environments.")
+    public FeaturesConfig setLegacyMaterializedViews(boolean value)
+    {
+        this.legacyMaterializedViewRefresh = value;
+        return this;
+    }
+
+    public boolean isAllowLegacyMaterializedViewsToggle()
+    {
+        return allowLegacyMaterializedViewsToggle;
+    }
+
+    @Config("experimental.allow-legacy-materialized-views-toggle")
+    @ConfigDescription("Allow toggling legacy materialized views via session property. This should only be enabled in non-production environments.")
+    public FeaturesConfig setAllowLegacyMaterializedViewsToggle(boolean value)
+    {
+        this.allowLegacyMaterializedViewsToggle = value;
+        return this;
+    }
+
+    public boolean isMaterializedViewAllowFullRefreshEnabled()
+    {
+        return materializedViewAllowFullRefreshEnabled;
+    }
+
+    @Config("materialized-view-allow-full-refresh-enabled")
+    @ConfigDescription("Allow full refresh of MV when it's empty - potentially high cost.")
+    public FeaturesConfig setMaterializedViewAllowFullRefreshEnabled(boolean value)
+    {
+        this.materializedViewAllowFullRefreshEnabled = value;
+        return this;
+    }
+
     public boolean isVerboseRuntimeStatsEnabled()
     {
         return verboseRuntimeStatsEnabled;
@@ -2243,6 +2345,19 @@ public class FeaturesConfig
     public FeaturesConfig setPreferSortMergeJoin(boolean preferSortMergeJoin)
     {
         this.preferSortMergeJoin = preferSortMergeJoin;
+        return this;
+    }
+
+    public boolean isSortedExchangeEnabled()
+    {
+        return isSortedExchangeEnabled;
+    }
+
+    @Config("experimental.optimizer.sorted-exchange-enabled")
+    @ConfigDescription("(Experimental) Enable pushing sort operations down to exchange nodes for distributed queries")
+    public FeaturesConfig setSortedExchangeEnabled(boolean isSortedExchangeEnabled)
+    {
+        this.isSortedExchangeEnabled = isSortedExchangeEnabled;
         return this;
     }
 
@@ -2410,6 +2525,19 @@ public class FeaturesConfig
     public FeaturesConfig setRandomizeOuterJoinNullKeyStrategy(RandomizeOuterJoinNullKeyStrategy randomizeOuterJoinNullKeyStrategy)
     {
         this.randomizeOuterJoinNullKeyStrategy = randomizeOuterJoinNullKeyStrategy;
+        return this;
+    }
+
+    public RandomizeNullSourceKeyInSemiJoinStrategy getRandomizeNullSourceKeyInSemiJoinStrategy()
+    {
+        return randomizeNullSourceKeyInSemiJoinStrategy;
+    }
+
+    @Config("optimizer.randomize-null-source-key-in-semi-join-strategy")
+    @ConfigDescription("When to apply randomization to null source keys in semi join")
+    public FeaturesConfig setRandomizeNullSourceKeyInSemiJoinStrategy(RandomizeNullSourceKeyInSemiJoinStrategy randomizeNullSourceKeyInSemiJoinStrategy)
+    {
+        this.randomizeNullSourceKeyInSemiJoinStrategy = randomizeNullSourceKeyInSemiJoinStrategy;
         return this;
     }
 
@@ -2829,14 +2957,14 @@ public class FeaturesConfig
         return this;
     }
 
-    public CreateView.Security getDefaultViewSecurityMode()
+    public ViewSecurity getDefaultViewSecurityMode()
     {
         return this.defaultViewSecurityMode;
     }
 
     @Config("default-view-security-mode")
     @ConfigDescription("Sets the default security mode for view creation. The options are definer/invoker.")
-    public FeaturesConfig setDefaultViewSecurityMode(CreateView.Security securityMode)
+    public FeaturesConfig setDefaultViewSecurityMode(ViewSecurity securityMode)
     {
         this.defaultViewSecurityMode = securityMode;
         return this;
@@ -3099,6 +3227,19 @@ public class FeaturesConfig
         return pushdownSubfieldForMapFunctions;
     }
 
+    @Config("optimizer.utilize-unique-property-in-query-planning")
+    @ConfigDescription("Utilize the unique property of input columns in query planning")
+    public FeaturesConfig setUtilizeUniquePropertyInQueryPlanning(boolean utilizeUniquePropertyInQueryPlanning)
+    {
+        this.utilizeUniquePropertyInQueryPlanning = utilizeUniquePropertyInQueryPlanning;
+        return this;
+    }
+
+    public boolean isUtilizeUniquePropertyInQueryPlanning()
+    {
+        return utilizeUniquePropertyInQueryPlanning;
+    }
+
     @Config("max_serializable_object_size")
     @ConfigDescription("Configure the maximum byte size of a serializable object in expression interpreters")
     public FeaturesConfig setMaxSerializableObjectSize(long maxSerializableObjectSize)
@@ -3110,5 +3251,18 @@ public class FeaturesConfig
     public long getMaxSerializableObjectSize()
     {
         return maxSerializableObjectSize;
+    }
+
+    @Config("built-in-sidecar-functions-enabled")
+    @ConfigDescription("Enable using CPP functions from sidecar over coordinator SQL implementations.")
+    public FeaturesConfig setBuiltInSidecarFunctionsEnabled(boolean builtInSidecarFunctionsEnabled)
+    {
+        this.builtInSidecarFunctionsEnabled = builtInSidecarFunctionsEnabled;
+        return this;
+    }
+
+    public boolean isBuiltInSidecarFunctionsEnabled()
+    {
+        return this.builtInSidecarFunctionsEnabled;
     }
 }

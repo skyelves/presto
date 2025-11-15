@@ -14,18 +14,26 @@
 package com.facebook.presto.sql.analyzer;
 
 import com.facebook.presto.common.QualifiedObjectName;
+import com.facebook.presto.common.SourceColumn;
 import com.facebook.presto.common.Subfield;
 import com.facebook.presto.common.transaction.TransactionId;
 import com.facebook.presto.common.type.Type;
 import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.ColumnMetadata;
+import com.facebook.presto.spi.ConnectorId;
+import com.facebook.presto.spi.MaterializedViewDefinition;
 import com.facebook.presto.spi.TableHandle;
 import com.facebook.presto.spi.analyzer.AccessControlInfo;
 import com.facebook.presto.spi.analyzer.AccessControlInfoForTable;
 import com.facebook.presto.spi.analyzer.AccessControlReferences;
 import com.facebook.presto.spi.analyzer.AccessControlRole;
+import com.facebook.presto.spi.analyzer.UpdateInfo;
+import com.facebook.presto.spi.connector.ConnectorTransactionHandle;
+import com.facebook.presto.spi.eventlistener.OutputColumnMetadata;
 import com.facebook.presto.spi.function.FunctionHandle;
 import com.facebook.presto.spi.function.FunctionKind;
+import com.facebook.presto.spi.function.table.Argument;
+import com.facebook.presto.spi.function.table.ConnectorTableFunctionHandle;
 import com.facebook.presto.spi.security.AccessControl;
 import com.facebook.presto.spi.security.AccessControlContext;
 import com.facebook.presto.spi.security.AllowAllAccessControl;
@@ -43,6 +51,7 @@ import com.facebook.presto.sql.tree.NodeRef;
 import com.facebook.presto.sql.tree.Offset;
 import com.facebook.presto.sql.tree.OrderBy;
 import com.facebook.presto.sql.tree.Parameter;
+import com.facebook.presto.sql.tree.QualifiedName;
 import com.facebook.presto.sql.tree.QuantifiedComparisonExpression;
 import com.facebook.presto.sql.tree.Query;
 import com.facebook.presto.sql.tree.QuerySpecification;
@@ -51,6 +60,7 @@ import com.facebook.presto.sql.tree.SampledRelation;
 import com.facebook.presto.sql.tree.Statement;
 import com.facebook.presto.sql.tree.SubqueryExpression;
 import com.facebook.presto.sql.tree.Table;
+import com.facebook.presto.sql.tree.TableFunctionInvocation;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.ImmutableList;
@@ -99,7 +109,7 @@ public class Analysis
     @Nullable
     private final Statement root;
     private final Map<NodeRef<Parameter>, Expression> parameters;
-    private String updateType;
+    private UpdateInfo updateInfo;
 
     private final Map<NodeRef<Table>, NamedQuery> namedQueries = new LinkedHashMap<>();
 
@@ -194,10 +204,26 @@ public class Analysis
 
     private final Map<QualifiedObjectName, String> materializedViews = new LinkedHashMap<>();
 
+    private final Map<NodeRef<Table>, MaterializedViewInfo> materializedViewInfoMap = new LinkedHashMap<>();
+
     private Optional<String> expandedQuery = Optional.empty();
 
     // Keeps track of the subquery we are visiting, so we have access to base query information when processing materialized view status
     private Optional<QuerySpecification> currentQuerySpecification = Optional.empty();
+
+    // Maps each output Field to its originating SourceColumn(s) for column-level lineage tracking.
+    private final Multimap<Field, SourceColumn> originColumnDetails = ArrayListMultimap.create();
+
+    // Maps each analyzed Expression to the Field(s) it produces, supporting expression-level lineage.
+    private final Multimap<NodeRef<Expression>, Field> fieldLineage = ArrayListMultimap.create();
+
+    private Optional<List<OutputColumnMetadata>> updatedSourceColumns = Optional.empty();
+
+    // names of tables and aliased relations. All names are resolved case-insensitive.
+    private final Map<NodeRef<Relation>, QualifiedName> relationNames = new LinkedHashMap<>();
+    private final Map<NodeRef<TableFunctionInvocation>, TableFunctionInvocationAnalysis> tableFunctionAnalyses = new LinkedHashMap<>();
+    private final Set<NodeRef<Relation>> aliasedRelations = new LinkedHashSet<>();
+    private final Set<NodeRef<TableFunctionInvocation>> polymorphicTableFunctions = new LinkedHashSet<>();
 
     public Analysis(@Nullable Statement root, Map<NodeRef<Parameter>, Expression> parameters, boolean isDescribe)
     {
@@ -211,14 +237,14 @@ public class Analysis
         return root;
     }
 
-    public String getUpdateType()
+    public UpdateInfo getUpdateInfo()
     {
-        return updateType;
+        return updateInfo;
     }
 
-    public void setUpdateType(String updateType)
+    public void setUpdateInfo(UpdateInfo updateInfo)
     {
-        this.updateType = updateType;
+        this.updateInfo = updateInfo;
     }
 
     public boolean isCreateTableAsSelectWithData()
@@ -794,6 +820,19 @@ public class Analysis
         return tablesForMaterializedView.containsEntry(NodeRef.of(view), table);
     }
 
+    public void setMaterializedViewInfo(Table table, MaterializedViewInfo materializedViewInfo)
+    {
+        requireNonNull(table, "table is null");
+        requireNonNull(materializedViewInfo, "materializedViewInfo is null");
+        materializedViewInfoMap.put(NodeRef.of(table), materializedViewInfo);
+    }
+
+    public Optional<MaterializedViewInfo> getMaterializedViewInfo(Table table)
+    {
+        requireNonNull(table, "table is null");
+        return Optional.ofNullable(materializedViewInfoMap.get(NodeRef.of(table)));
+    }
+
     public void setSampleRatio(SampledRelation relation, double ratio)
     {
         sampleRatios.put(NodeRef.of(relation), ratio);
@@ -892,12 +931,12 @@ public class Analysis
         return ImmutableMap.copyOf(utilizedTableColumnReferences);
     }
 
-    public void populateTableColumnAndSubfieldReferencesForAccessControl(boolean checkAccessControlOnUtilizedColumnsOnly, boolean checkAccessControlWithSubfields)
+    public void populateTableColumnAndSubfieldReferencesForAccessControl(boolean checkAccessControlOnUtilizedColumnsOnly, boolean checkAccessControlWithSubfields, boolean isLegacyMaterializedViews)
     {
-        accessControlReferences.addTableColumnAndSubfieldReferencesForAccessControl(getTableColumnAndSubfieldReferencesForAccessControl(checkAccessControlOnUtilizedColumnsOnly, checkAccessControlWithSubfields));
+        accessControlReferences.addTableColumnAndSubfieldReferencesForAccessControl(getTableColumnAndSubfieldReferencesForAccessControl(checkAccessControlOnUtilizedColumnsOnly, checkAccessControlWithSubfields, isLegacyMaterializedViews));
     }
 
-    private Map<AccessControlInfo, Map<QualifiedObjectName, Set<Subfield>>> getTableColumnAndSubfieldReferencesForAccessControl(boolean checkAccessControlOnUtilizedColumnsOnly, boolean checkAccessControlWithSubfields)
+    private Map<AccessControlInfo, Map<QualifiedObjectName, Set<Subfield>>> getTableColumnAndSubfieldReferencesForAccessControl(boolean checkAccessControlOnUtilizedColumnsOnly, boolean checkAccessControlWithSubfields, boolean isLegacyMaterializedViews)
     {
         Map<AccessControlInfo, Map<QualifiedObjectName, Set<Subfield>>> references;
         if (!checkAccessControlWithSubfields) {
@@ -929,16 +968,23 @@ public class Analysis
                                                     })
                                                     .collect(toImmutableSet())))));
         }
-        return buildMaterializedViewAccessControl(references);
+        return buildMaterializedViewAccessControl(references, isLegacyMaterializedViews);
     }
 
     /**
-     * For a query on materialized view, only check the actual required access controls for its base tables. For the materialized view,
-     * will not check access control by replacing with AllowAllAccessControl.
+     * For a query on materialized view:
+     * - When legacy_materialized_views=true: Only check access controls for base tables, bypass access control
+     *   for the materialized view itself by replacing with AllowAllAccessControl.
+     * - When legacy_materialized_views=false: Check access control for both the materialized view itself
+     *   and all base tables referenced in the view query.
      **/
-    private Map<AccessControlInfo, Map<QualifiedObjectName, Set<Subfield>>> buildMaterializedViewAccessControl(Map<AccessControlInfo, Map<QualifiedObjectName, Set<Subfield>>> tableColumnReferences)
+    private Map<AccessControlInfo, Map<QualifiedObjectName, Set<Subfield>>> buildMaterializedViewAccessControl(Map<AccessControlInfo, Map<QualifiedObjectName, Set<Subfield>>> tableColumnReferences, boolean isLegacyMaterializedViews)
     {
         if (!(getStatement() instanceof Query) || materializedViews.isEmpty()) {
+            return tableColumnReferences;
+        }
+
+        if (!isLegacyMaterializedViews) {
             return tableColumnReferences;
         }
 
@@ -1039,6 +1085,38 @@ public class Analysis
         return columnMaskScopes.contains(new ColumnMaskScopeEntry(table, column, identity));
     }
 
+    public void addSourceColumns(Field field, Set<SourceColumn> sourceColumn)
+    {
+        originColumnDetails.putAll(field, sourceColumn);
+    }
+
+    public Set<SourceColumn> getSourceColumns(Field field)
+    {
+        return ImmutableSet.copyOf(originColumnDetails.get(field));
+    }
+
+    public void addExpressionFields(Expression expression, Collection<Field> fields)
+    {
+        fieldLineage.putAll(NodeRef.of(expression), fields);
+    }
+
+    public Set<SourceColumn> getExpressionSourceColumns(Expression expression)
+    {
+        return fieldLineage.get(NodeRef.of(expression)).stream()
+                .flatMap(field -> getSourceColumns(field).stream())
+                .collect(toImmutableSet());
+    }
+
+    public void setUpdatedSourceColumns(Optional<List<OutputColumnMetadata>> targetColumns)
+    {
+        this.updatedSourceColumns = targetColumns;
+    }
+
+    public Optional<List<OutputColumnMetadata>> getUpdatedSourceColumns()
+    {
+        return updatedSourceColumns;
+    }
+
     public void registerTableForColumnMasking(QualifiedObjectName table, String column, String identity)
     {
         columnMaskScopes.add(new ColumnMaskScopeEntry(table, column, identity));
@@ -1059,6 +1137,46 @@ public class Analysis
     public Map<String, Expression> getColumnMasks(Table table)
     {
         return columnMasks.getOrDefault(NodeRef.of(table), ImmutableMap.of());
+    }
+
+    public void setTableFunctionAnalysis(TableFunctionInvocation node, TableFunctionInvocationAnalysis analysis)
+    {
+        tableFunctionAnalyses.put(NodeRef.of(node), analysis);
+    }
+
+    public TableFunctionInvocationAnalysis getTableFunctionAnalysis(TableFunctionInvocation node)
+    {
+        return tableFunctionAnalyses.get(NodeRef.of(node));
+    }
+
+    public void setRelationName(Relation relation, QualifiedName name)
+    {
+        relationNames.put(NodeRef.of(relation), name);
+    }
+
+    public QualifiedName getRelationName(Relation relation)
+    {
+        return relationNames.get(NodeRef.of(relation));
+    }
+
+    public void addAliased(Relation relation)
+    {
+        aliasedRelations.add(NodeRef.of(relation));
+    }
+
+    public boolean isAliased(Relation relation)
+    {
+        return aliasedRelations.contains(NodeRef.of(relation));
+    }
+
+    public void addPolymorphicTableFunction(TableFunctionInvocation invocation)
+    {
+        polymorphicTableFunctions.add(NodeRef.of(invocation));
+    }
+
+    public boolean isPolymorphicTableFunction(TableFunctionInvocation invocation)
+    {
+        return polymorphicTableFunctions.contains(NodeRef.of(invocation));
     }
 
     @Immutable
@@ -1113,6 +1231,47 @@ public class Analysis
         public Query getQuery()
         {
             return query;
+        }
+    }
+
+    @Immutable
+    public static final class MaterializedViewInfo
+    {
+        private final QualifiedObjectName materializedViewName;
+        private final Table dataTable;
+        private final Query viewQuery;
+        private final MaterializedViewDefinition materializedViewDefinition;
+
+        public MaterializedViewInfo(
+                QualifiedObjectName materializedViewName,
+                Table dataTable,
+                Query viewQuery,
+                MaterializedViewDefinition materializedViewDefinition)
+        {
+            this.materializedViewName = requireNonNull(materializedViewName, "materializedViewName is null");
+            this.dataTable = requireNonNull(dataTable, "dataTable is null");
+            this.viewQuery = requireNonNull(viewQuery, "viewQuery is null");
+            this.materializedViewDefinition = requireNonNull(materializedViewDefinition, "materializedViewDefinition is null");
+        }
+
+        public QualifiedObjectName getMaterializedViewName()
+        {
+            return materializedViewName;
+        }
+
+        public Table getDataTable()
+        {
+            return dataTable;
+        }
+
+        public Query getViewQuery()
+        {
+            return viewQuery;
+        }
+
+        public MaterializedViewDefinition getMaterializedViewDefinition()
+        {
+            return materializedViewDefinition;
         }
     }
 
@@ -1309,6 +1468,295 @@ public class Analysis
         public int hashCode()
         {
             return Objects.hash(table, column, identity);
+        }
+    }
+
+    public static class TableArgumentAnalysis
+    {
+        private final String argumentName;
+        private final Optional<QualifiedName> name;
+        private final Relation relation;
+        private final Optional<List<Expression>> partitionBy; // it is allowed to partition by empty list
+        private final Optional<OrderBy> orderBy;
+        private final boolean pruneWhenEmpty;
+        private final boolean rowSemantics;
+        private final boolean passThroughColumns;
+
+        private TableArgumentAnalysis(
+                String argumentName,
+                Optional<QualifiedName> name,
+                Relation relation,
+                Optional<List<Expression>> partitionBy,
+                Optional<OrderBy> orderBy,
+                boolean pruneWhenEmpty,
+                boolean rowSemantics,
+                boolean passThroughColumns)
+        {
+            this.argumentName = requireNonNull(argumentName, "argumentName is null");
+            this.name = requireNonNull(name, "name is null");
+            this.relation = requireNonNull(relation, "relation is null");
+            this.partitionBy = requireNonNull(partitionBy, "partitionBy is null").map(ImmutableList::copyOf);
+            this.orderBy = requireNonNull(orderBy, "orderBy is null");
+            this.pruneWhenEmpty = pruneWhenEmpty;
+            this.rowSemantics = rowSemantics;
+            this.passThroughColumns = passThroughColumns;
+        }
+
+        public String getArgumentName()
+        {
+            return argumentName;
+        }
+
+        public Optional<QualifiedName> getName()
+        {
+            return name;
+        }
+
+        public Relation getRelation()
+        {
+            return relation;
+        }
+
+        public Optional<List<Expression>> getPartitionBy()
+        {
+            return partitionBy;
+        }
+
+        public Optional<OrderBy> getOrderBy()
+        {
+            return orderBy;
+        }
+
+        public boolean isPruneWhenEmpty()
+        {
+            return pruneWhenEmpty;
+        }
+
+        public boolean isRowSemantics()
+        {
+            return rowSemantics;
+        }
+
+        public boolean isPassThroughColumns()
+        {
+            return passThroughColumns;
+        }
+
+        public static Builder builder()
+        {
+            return new Builder();
+        }
+
+        public static final class Builder
+        {
+            private String argumentName;
+            private Optional<QualifiedName> name = Optional.empty();
+            private Relation relation;
+            private Optional<List<Expression>> partitionBy = Optional.empty();
+            private Optional<OrderBy> orderBy = Optional.empty();
+            private boolean pruneWhenEmpty;
+            private boolean rowSemantics;
+            private boolean passThroughColumns;
+
+            private Builder() {}
+
+            public Builder withArgumentName(String argumentName)
+            {
+                this.argumentName = argumentName;
+                return this;
+            }
+
+            public Builder withName(QualifiedName name)
+            {
+                this.name = Optional.of(name);
+                return this;
+            }
+
+            public Builder withRelation(Relation relation)
+            {
+                this.relation = relation;
+                return this;
+            }
+
+            public Builder withPartitionBy(List<Expression> partitionBy)
+            {
+                this.partitionBy = Optional.of(partitionBy);
+                return this;
+            }
+
+            public Builder withOrderBy(OrderBy orderBy)
+            {
+                this.orderBy = Optional.of(orderBy);
+                return this;
+            }
+
+            public Builder withPruneWhenEmpty(boolean pruneWhenEmpty)
+            {
+                this.pruneWhenEmpty = pruneWhenEmpty;
+                return this;
+            }
+
+            public Builder withRowSemantics(boolean rowSemantics)
+            {
+                this.rowSemantics = rowSemantics;
+                return this;
+            }
+
+            public Builder withPassThroughColumns(boolean passThroughColumns)
+            {
+                this.passThroughColumns = passThroughColumns;
+                return this;
+            }
+
+            public TableArgumentAnalysis build()
+            {
+                return new TableArgumentAnalysis(argumentName, name, relation, partitionBy, orderBy, pruneWhenEmpty, rowSemantics, passThroughColumns);
+            }
+        }
+    }
+
+    /**
+     * Encapsulates the result of analyzing a table function invocation.
+     * Includes the connector ID, function name, argument bindings, and the
+     * connector-specific table function handle needed for planning and execution.
+     *
+     * Example of a TableFunctionInvocationAnalysis for a table function
+     * with two table arguments, required columns, and co-partitioning
+     * implemented by {@link TestingTableFunctions.TwoTableArgumentsFunction}
+     *
+     * SQL:
+     * SELECT * FROM TABLE(system.two_table_arguments_function(
+     *     input1 => TABLE(t1) PARTITION BY (a, b),
+     *     input2 => TABLE(SELECT 1, 2) t1(x, y) PARTITION BY (x, y)
+     *     COPARTITION(t1, s1.t1)))
+     *
+     * Table Function:
+     *   super(
+     *     SCHEMA_NAME,
+     *     "two_table_arguments_function",
+     *     ImmutableList.of(
+     *       TableArgumentSpecification.builder()
+     *         .name("INPUT1")
+     *         .build(),
+     *       TableArgumentSpecification.builder()
+     *         .name("INPUT2")
+     *         .build()),
+     *     GENERIC_TABLE);
+     *
+     * analyze:
+     *   return TableFunctionAnalysis.builder()
+     *     .handle(HANDLE)
+     *     .returnedType(new Descriptor(ImmutableList.of(new Descriptor.Field(COLUMN_NAME, Optional.of(BOOLEAN)))))
+     *     .requiredColumns("INPUT1", ImmutableList.of(0))
+     *     .requiredColumns("INPUT2", ImmutableList.of(0))
+     *     .build();
+     *
+     * Example values:
+     * connectorId = "tpch"
+     * functionName = "two_table_arguments_function"
+     * arguments = {
+     *     "input1" -> row(a bigint,b bigint,c bigint,d bigint),
+     *     "input2" -> row(x integer,y integer)
+     * }
+     * tableArgumentAnalyses = [
+     *     { argumentName="INPUT1", relation=Table{t1}, partitionBy=[a, b], orderBy=[], pruneWhenEmpty=false },
+     *     { argumentName="INPUT2", relation=AliasedRelation{SELECT 1, 2 AS x, y}, partitionBy=[x, y], orderBy=[], pruneWhenEmpty=false }
+     * ]
+     * requiredColumns = {
+     *     "INPUT1" -> [0],
+     *     "INPUT2" -> [0]
+     * }
+     * copartitioningLists = [
+     *     ["INPUT2", "INPUT1"]
+     * ]
+     * properColumnsCount = 1
+     * connectorTableFunctionHandle = TestingTableFunctionPushdownHandle
+     * transactionHandle = AbstractAnalyzerTest$1$1
+     *
+     */
+    public static class TableFunctionInvocationAnalysis
+    {
+        private final ConnectorId connectorId;
+        private final String functionName;
+        private final Map<String, Argument> arguments;
+        private final List<TableArgumentAnalysis> tableArgumentAnalyses;
+        private final Map<String, List<Integer>> requiredColumns;
+        private final List<List<String>> copartitioningLists;
+        private final int properColumnsCount;
+        private final ConnectorTableFunctionHandle connectorTableFunctionHandle;
+        private final ConnectorTransactionHandle transactionHandle;
+
+        public TableFunctionInvocationAnalysis(
+                ConnectorId connectorId,
+                String functionName,
+                Map<String, Argument> arguments,
+                List<TableArgumentAnalysis> tableArgumentAnalyses,
+                Map<String, List<Integer>> requiredColumns,
+                List<List<String>> copartitioningLists,
+                int properColumnsCount,
+                ConnectorTableFunctionHandle connectorTableFunctionHandle,
+                ConnectorTransactionHandle transactionHandle)
+        {
+            this.connectorId = requireNonNull(connectorId, "connectorId is null");
+            this.functionName = requireNonNull(functionName, "functionName is null");
+            this.arguments = ImmutableMap.copyOf(arguments);
+            this.connectorTableFunctionHandle = requireNonNull(connectorTableFunctionHandle, "connectorTableFunctionHandle is null");
+            this.transactionHandle = requireNonNull(transactionHandle, "transactionHandle is null");
+            this.tableArgumentAnalyses = ImmutableList.copyOf(tableArgumentAnalyses);
+            this.requiredColumns = requiredColumns.entrySet().stream()
+                    .collect(toImmutableMap(Map.Entry::getKey, entry -> ImmutableList.copyOf(entry.getValue())));
+            this.copartitioningLists = ImmutableList.copyOf(copartitioningLists);
+            this.properColumnsCount = properColumnsCount;
+        }
+
+        public ConnectorId getConnectorId()
+        {
+            return connectorId;
+        }
+
+        public String getFunctionName()
+        {
+            return functionName;
+        }
+
+        public Map<String, Argument> getArguments()
+        {
+            return arguments;
+        }
+
+        public List<TableArgumentAnalysis> getTableArgumentAnalyses()
+        {
+            return tableArgumentAnalyses;
+        }
+
+        public Map<String, List<Integer>> getRequiredColumns()
+        {
+            return requiredColumns;
+        }
+
+        public List<List<String>> getCopartitioningLists()
+        {
+            return copartitioningLists;
+        }
+
+        /**
+         * Proper columns are the columns produced by the table function, as opposed to pass-through columns from input tables.
+         * Proper columns should be considered the actual result of the table function.
+         * @return the number of table function's proper columns
+         */
+        public int getProperColumnsCount()
+        {
+            return properColumnsCount;
+        }
+
+        public ConnectorTableFunctionHandle getConnectorTableFunctionHandle()
+        {
+            return connectorTableFunctionHandle;
+        }
+
+        public ConnectorTransactionHandle getTransactionHandle()
+        {
+            return transactionHandle;
         }
     }
 }

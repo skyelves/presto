@@ -83,7 +83,6 @@ import java.util.Properties;
 
 import static com.facebook.presto.hive.BaseHiveColumnHandle.ColumnType.REGULAR;
 import static com.facebook.presto.hive.CacheQuota.NO_CACHE_CONSTRAINTS;
-import static com.facebook.presto.hive.HiveCompressionCodec.NONE;
 import static com.facebook.presto.hive.HiveStorageFormat.PAGEFILE;
 import static com.facebook.presto.hive.HiveTestUtils.FUNCTION_AND_TYPE_MANAGER;
 import static com.facebook.presto.hive.HiveTestUtils.FUNCTION_RESOLUTION;
@@ -161,7 +160,6 @@ public enum FileFormat
         {
             HiveBatchPageSourceFactory pageSourceFactory = new OrcBatchPageSourceFactory(
                     FUNCTION_AND_TYPE_MANAGER,
-                    false,
                     hdfsEnvironment,
                     new FileFormatDataSourceStats(),
                     100,
@@ -247,9 +245,6 @@ public enum FileFormat
                 HiveCompressionCodec compressionCodec)
                 throws IOException
         {
-            if (!compressionCodec.isSupportedStorageFormat(PAGEFILE)) {
-                compressionCodec = NONE;
-            }
             return new PrestoPageFormatWriter(targetFile, compressionCodec);
         }
     },
@@ -697,7 +692,7 @@ public enum FileFormat
                     columnNames,
                     types,
                     ParquetWriterOptions.builder().build(),
-                    compressionCodec.getParquetCompressionCodec().get().getHadoopCompressionCodecClassName());
+                    compressionCodec.getParquetCompressionCodec().getHadoopCompressionCodecClassName());
         }
 
         @Override

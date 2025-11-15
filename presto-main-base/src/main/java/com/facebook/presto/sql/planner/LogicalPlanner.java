@@ -286,7 +286,7 @@ public class LogicalPlanner
         return createTableWriterPlan(
                 analysis,
                 plan,
-                new CreateName(new ConnectorId(destination.getCatalogName()), tableMetadata, newTableLayout),
+                new CreateName(new ConnectorId(destination.getCatalogName()), tableMetadata, newTableLayout, analysis.getUpdatedSourceColumns()),
                 columnNames,
                 tableMetadata.getColumns(),
                 newTableLayout,
@@ -310,7 +310,7 @@ public class LogicalPlanner
 
         TableHandle tableHandle = insertAnalysis.getTarget();
         List<ColumnHandle> columnHandles = insertAnalysis.getColumns();
-        TableWriterNode.WriterTarget target = new InsertReference(tableHandle, metadata.getTableMetadata(session, tableHandle).getTable());
+        TableWriterNode.WriterTarget target = new InsertReference(tableHandle, metadata.getTableMetadata(session, tableHandle).getTable(), analysis.getUpdatedSourceColumns());
 
         return buildInternalInsertPlan(tableHandle, columnHandles, insertStatement.getQuery(), analysis, target);
     }
@@ -511,7 +511,7 @@ public class LogicalPlanner
                 .filter(column -> !column.isHidden())
                 .collect(toImmutableList());
         List<String> targetColumnNames = node.getAssignments().stream()
-                .map(assignment -> assignment.getName().getValue())
+                .map(assignment -> metadata.normalizeIdentifier(session, handle.getConnectorId().getCatalogName(), assignment.getName().getValue()))
                 .collect(toImmutableList());
 
         for (ColumnMetadata columnMetadata : dataColumns) {

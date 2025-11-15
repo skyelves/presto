@@ -15,7 +15,12 @@ add_subdirectory(http)
 add_subdirectory(common)
 add_subdirectory(thrift)
 add_subdirectory(connectors)
-add_subdirectory(dynamic_registry)
+add_subdirectory(functions)
+add_subdirectory(tool)
+
+add_library(presto_session_properties SessionProperties.cpp)
+
+target_link_libraries(presto_session_properties ${FOLLY_WITH_DEPENDENCIES})
 
 add_library(
   presto_server_lib
@@ -32,16 +37,23 @@ add_library(
   QueryContextManager.cpp
   ServerOperation.cpp
   SignalHandler.cpp
-  SessionProperties.cpp
   TaskManager.cpp
   TaskResource.cpp
   PeriodicHeartbeatManager.cpp
-  PeriodicServiceInventoryManager.cpp)
+  PeriodicServiceInventoryManager.cpp
+)
 
-add_dependencies(presto_server_lib presto_operators presto_protocol
-                 presto_types presto_thrift-cpp2 presto_thrift_extra)
+add_dependencies(
+  presto_server_lib
+  presto_operators
+  presto_protocol
+  presto_types
+  presto_thrift-cpp2
+  presto_thrift_extra
+)
 
 target_include_directories(presto_server_lib PRIVATE ${presto_thrift_INCLUDES})
+
 target_link_libraries(
   presto_server_lib
   $<TARGET_OBJECTS:presto_type_converter>
@@ -53,7 +65,9 @@ target_link_libraries(
   presto_connectors
   presto_http
   presto_operators
+  presto_session_properties
   presto_velox_plan_conversion
+  presto_hive_functions
   velox_abfs
   velox_aggregates
   velox_caching
@@ -78,10 +92,10 @@ target_link_libraries(
   velox_hive_iceberg_splitreader
   velox_hive_partition_function
   velox_presto_serializer
+  velox_presto_type_parser
   velox_s3fs
   velox_serialization
   velox_time
-  velox_type_parser
   velox_type
   velox_type_fbhive
   velox_type_tz
@@ -91,7 +105,8 @@ target_link_libraries(
   ${FOLLY_WITH_DEPENDENCIES}
   ${GLOG}
   ${GFLAGS_LIBRARIES}
-  pthread)
+  pthread
+)
 
 if(PRESTO_ENABLE_CUDF)
   target_link_libraries(presto_server_lib velox_cudf_exec)
@@ -101,28 +116,28 @@ endif()
 # likely due to a conflict between Arrow Thrift from velox_hive_connector and
 # FBThrift libraries. The build issue is fixed by linking velox_hive_connector
 # dependencies first followed by FBThrift.
-target_link_libraries(presto_server_lib presto_thrift-cpp2 presto_thrift_extra
-                      ${THRIFT_LIBRARY})
+target_link_libraries(presto_server_lib presto_thrift-cpp2 presto_thrift_extra ${THRIFT_LIBRARY})
 
 if(PRESTO_ENABLE_REMOTE_FUNCTIONS)
-  add_library(presto_server_remote_function JsonSignatureParser.cpp
-                                            RemoteFunctionRegisterer.cpp)
+  add_library(presto_server_remote_function JsonSignatureParser.cpp RemoteFunctionRegisterer.cpp)
 
-  target_link_libraries(presto_server_remote_function velox_expression
-                        velox_functions_remote ${FOLLY_WITH_DEPENDENCIES})
+  target_link_libraries(
+    presto_server_remote_function
+    velox_expression
+    velox_functions_remote
+    ${FOLLY_WITH_DEPENDENCIES}
+  )
   target_link_libraries(presto_server_lib presto_server_remote_function)
 endif()
 
-set_property(TARGET presto_server_lib PROPERTY JOB_POOL_LINK
-                                               presto_link_job_pool)
+set_property(TARGET presto_server_lib PROPERTY JOB_POOL_LINK presto_link_job_pool)
 
 add_executable(presto_server PrestoMain.cpp)
 
 # The below additional flags are necessary for resolving dependencies for
 # loading dynamic libraries.
 if(APPLE)
-  target_link_options(presto_server BEFORE PUBLIC
-                      "-Wl,-undefined,dynamic_lookup")
+  target_link_options(presto_server BEFORE PUBLIC "-Wl,-undefined,dynamic_lookup")
 else()
   target_link_options(presto_server BEFORE PUBLIC "-Wl,-export-dynamic")
 endif()
@@ -132,11 +147,13 @@ endif()
 # However, we also would need to add its dependencies (tpch_gen etc). TODO
 # change the target in Velox to a library target then we can move this to the
 # presto_server_lib.
-target_link_libraries(presto_server presto_server_lib velox_tpch_connector)
+target_link_libraries(presto_server presto_server_lib velox_tpch_connector velox_tpcds_connector)
 
 # Clang requires explicit linking with libatomic.
-if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang"
-   AND "${CMAKE_CXX_COMPILER_VERSION}" VERSION_GREATER_EQUAL 15)
+if(
+  "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang"
+  AND "${CMAKE_CXX_COMPILER_VERSION}" VERSION_GREATER_EQUAL 15
+)
   target_link_libraries(presto_server atomic)
 endif()
 
@@ -152,9 +169,7 @@ if(PRESTO_STATS_REPORTER_TYPE)
     add_subdirectory(runtime-metrics)
     target_link_libraries(presto_server presto_prometheus_reporter)
   else()
-    message(
-      FATAL_ERROR
-        "${PRESTO_STATS_REPORTER_TYPE} is not a valid stats reporter name")
+    message(FATAL_ERROR "${PRESTO_STATS_REPORTER_TYPE} is not a valid stats reporter name")
   endif()
 endif()
 
@@ -162,14 +177,10 @@ if(PRESTO_MEMORY_CHECKER_TYPE)
   add_compile_definitions(PRESTO_MEMORY_CHECKER_TYPE)
   # Check if the current platform is Linux and the memory checker type is
   # LINUX_MEMORY_CHECKER.
-  if(UNIX
-     AND NOT APPLE
-     AND (PRESTO_MEMORY_CHECKER_TYPE STREQUAL "LINUX_MEMORY_CHECKER"))
+  if(UNIX AND NOT APPLE AND (PRESTO_MEMORY_CHECKER_TYPE STREQUAL "LINUX_MEMORY_CHECKER"))
     add_library(presto_linux_memory_checker OBJECT LinuxMemoryChecker.cpp)
     target_link_libraries(presto_server presto_linux_memory_checker)
   else()
-    message(
-      FATAL_ERROR
-        "${PRESTO_MEMORY_CHECKER_TYPE} is not a valid memory checker name")
+    message(FATAL_ERROR "${PRESTO_MEMORY_CHECKER_TYPE} is not a valid memory checker name")
   endif()
 endif()

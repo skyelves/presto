@@ -42,6 +42,10 @@ class SystemTableHandle : public velox::connector::ConnectorTableHandle {
 
   std::string toString() const override;
 
+  const std::string& name() const override {
+    return name_;
+  }
+
   const std::string& schemaName() const {
     return schemaName_;
   }
@@ -53,6 +57,7 @@ class SystemTableHandle : public velox::connector::ConnectorTableHandle {
   const velox::RowTypePtr taskSchema() const;
 
  private:
+  const std::string name_;
   const std::string schemaName_;
   const std::string tableName_;
 };
@@ -87,7 +92,7 @@ class SystemDataSource : public velox::connector::DataSource {
     return completedBytes_;
   }
 
-  std::unordered_map<std::string, velox::RuntimeCounter> runtimeStats()
+  std::unordered_map<std::string, velox::RuntimeMetric> getRuntimeStats()
       override {
     return {};
   }
@@ -158,7 +163,8 @@ class SystemConnector : public velox::connector::Connector {
 
   std::unique_ptr<velox::connector::DataSink> createDataSink(
       velox::RowTypePtr /*inputType*/,
-      velox::connector::ConnectorInsertTableHandlePtr /*connectorInsertTableHandle*/,
+      velox::connector::
+          ConnectorInsertTableHandlePtr /*connectorInsertTableHandle*/,
       velox::connector::ConnectorQueryCtx* /*connectorQueryCtx*/,
       velox::connector::CommitStrategy /*commitStrategy*/) override final {
     VELOX_NYI("SystemConnector does not support data sink.");
@@ -185,9 +191,7 @@ class SystemPrestoToVeloxConnector final : public PrestoToVeloxConnector {
   std::unique_ptr<velox::connector::ConnectorTableHandle> toVeloxTableHandle(
       const protocol::TableHandle& tableHandle,
       const VeloxExprConverter& exprConverter,
-      const TypeParser& typeParser,
-      velox::connector::ColumnHandleMap& assignments)
-      const final;
+      const TypeParser& typeParser) const final;
 
   std::unique_ptr<protocol::ConnectorProtocol> createConnectorProtocol()
       const final;

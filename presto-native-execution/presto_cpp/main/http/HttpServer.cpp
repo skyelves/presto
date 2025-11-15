@@ -107,11 +107,13 @@ HttpsConfig::HttpsConfig(
     const std::string& keyPath,
     const std::string& supportedCiphers,
     bool reusePort,
-    bool http2Enabled)
+    bool http2Enabled,
+    const std::string& clientCaFile)
     : address_(address),
       certPath_(certPath),
       keyPath_(keyPath),
       supportedCiphers_(supportedCiphers),
+      clientCaFile_(clientCaFile),
       reusePort_(reusePort),
       http2Enabled_(http2Enabled) {
   // Wangle separates ciphers by ":" where in the config it's separated with ","
@@ -128,6 +130,12 @@ proxygen::HTTPServer::IPConfig HttpsConfig::ipConfig() const {
       folly::SSLContext::VerifyClientCertificate::DO_NOT_REQUEST;
   sslCfg.setCertificate(certPath_, keyPath_, "");
   sslCfg.sslCiphers = supportedCiphers_;
+  if (!clientCaFile_.empty()) {
+    sslCfg.clientCAFiles = {clientCaFile_};
+    sslCfg.clientVerification =
+        folly::SSLContext::VerifyClientCertificate::ALWAYS;
+  }
+
   if (http2Enabled_) {
     sslCfg.setNextProtocols({"h2", "http/1.1"});
   }
@@ -265,8 +273,10 @@ void HttpServer::start(
     std::function<void(proxygen::HTTPServer* /*server*/)> onSuccess,
     std::function<void(std::exception_ptr)> onError) {
   proxygen::HTTPServerOptions options;
-  options.idleTimeout = std::chrono::milliseconds(60'000);
-  options.enableContentCompression = false;
+
+  auto systemConfig = SystemConfig::instance();
+  options.idleTimeout =
+      std::chrono::milliseconds(systemConfig->httpServerIdleTimeoutMs());
 
   proxygen::RequestHandlerChain handlerFactories;
 
@@ -280,11 +290,39 @@ void HttpServer::start(
   handlerFactories.addThen(std::move(handlerFactory_));
   options.handlerFactories = handlerFactories.build();
 
-  // Increase the default flow control to 1MB/10MB
-  options.initialReceiveWindow = static_cast<uint32_t>(1 << 20);
-  options.receiveStreamWindowSize = static_cast<uint32_t>(1 << 20);
-  options.receiveSessionWindowSize = 10 * (1 << 20);
+  // HTTP/2 flow control window sizes (configurable)
+  options.initialReceiveWindow =
+      systemConfig->httpServerHttp2InitialReceiveWindow();
+  options.receiveStreamWindowSize =
+      systemConfig->httpServerHttp2ReceiveStreamWindowSize();
+  options.receiveSessionWindowSize =
+      systemConfig->httpServerHttp2ReceiveSessionWindowSize();
+  options.maxConcurrentIncomingStreams =
+      systemConfig->httpServerHttp2MaxConcurrentStreams();
   options.h2cEnabled = true;
+
+  // Enable HTTP/2 responses compression for better performance
+  // Supports both gzip and zstd (zstd preferred when client supports it)
+  options.enableContentCompression =
+      systemConfig->httpServerEnableContentCompression();
+  options.contentCompressionLevel =
+      systemConfig->httpServerContentCompressionLevel();
+  options.contentCompressionMinimumSize =
+      systemConfig->httpServerContentCompressionMinimumSize();
+  options.enableZstdCompression =
+      systemConfig->httpServerEnableZstdCompression();
+  options.zstdContentCompressionLevel =
+      systemConfig->httpServerZstdContentCompressionLevel();
+  options.enableGzipCompression =
+      systemConfig->httpServerEnableGzipCompression();
+
+  // CRITICAL: Add Thrift content-types for Presto task updates
+  // By default, proxygen only compresses text/* and some application/* types
+  // We need to explicitly add all Thrift variants used by Presto
+  options.contentCompressionTypes.insert(
+      "application/x-thrift"); // Standard Thrift
+  options.contentCompressionTypes.insert(
+      "application/x-thrift+binary"); // Thrift binary protocol
 
   server_ = std::make_unique<proxygen::HTTPServer>(std::move(options));
 

@@ -16,21 +16,19 @@ package com.facebook.presto.plugin.mysql;
 import com.facebook.presto.Session;
 import com.facebook.presto.testing.MaterializedResult;
 import com.facebook.presto.testing.QueryRunner;
-import com.facebook.presto.testing.mysql.MySqlOptions;
-import com.facebook.presto.testing.mysql.TestingMySqlServer;
 import com.facebook.presto.tests.AbstractTestQueryFramework;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import io.airlift.tpch.TpchTable;
+import org.testcontainers.containers.MySQLContainer;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.Test;
 
-import java.io.IOException;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
 
+import static com.facebook.presto.common.type.BigintType.BIGINT;
 import static com.facebook.presto.common.type.VarcharType.VARCHAR;
 import static com.facebook.presto.plugin.mysql.MySqlQueryRunner.createMySqlQueryRunner;
 import static com.facebook.presto.testing.TestingSession.testSessionBuilder;
@@ -42,29 +40,34 @@ import static org.testng.Assert.assertTrue;
 public class TestMySqlIntegrationMixedCaseTest
         extends AbstractTestQueryFramework
 {
-    private static final MySqlOptions MY_SQL_OPTIONS = MySqlOptions.builder()
-            .build();
-
-    private final TestingMySqlServer mysqlServer;
+    private final MySQLContainer<?> mysqlContainer;
 
     public TestMySqlIntegrationMixedCaseTest()
             throws Exception
     {
-        this.mysqlServer = new TestingMySqlServer("testuser", "testpass", ImmutableList.of("tpch", "Mixed_Test_Database"), MY_SQL_OPTIONS);
+        this.mysqlContainer = new MySQLContainer<>("mysql:8.0")
+                .withDatabaseName("tpch")
+                .withUsername("testuser")
+                .withPassword("testpass");
+        this.mysqlContainer.start();
+
+        mysqlContainer.execInContainer("mysql",
+                "-u", "root",
+                "-p" + mysqlContainer.getPassword(),
+                "-e", "CREATE DATABASE IF NOT EXISTS Mixed_Test_Database; GRANT ALL PRIVILEGES ON Mixed_Test_Database.* TO 'testuser'@'%';");
     }
 
     @Override
     protected QueryRunner createQueryRunner()
             throws Exception
     {
-        return createMySqlQueryRunner(mysqlServer, ImmutableMap.of("case-sensitive-name-matching", "true"), TpchTable.getTables());
+        return createMySqlQueryRunner(mysqlContainer.getJdbcUrl(), ImmutableMap.of("case-sensitive-name-matching", "true"), TpchTable.getTables());
     }
 
     @AfterClass(alwaysRun = true)
     public final void destroy()
-            throws IOException
     {
-        mysqlServer.close();
+        mysqlContainer.stop();
     }
 
     public void testDescribeTable()
@@ -82,16 +85,16 @@ public class TestMySqlIntegrationMixedCaseTest
         // we need specific implementation of this tests due to specific Presto<->Mysql varchar length mapping.
         MaterializedResult actualColumns = computeActual("DESC ORDERS").toTestTypes();
 
-        MaterializedResult expectedColumns = MaterializedResult.resultBuilder(getQueryRunner().getDefaultSession(), VARCHAR, VARCHAR, VARCHAR, VARCHAR)
-                .row("orderkey", "bigint", "", "")
-                .row("custkey", "bigint", "", "")
-                .row("orderstatus", "varchar(255)", "", "")
-                .row("totalprice", "double", "", "")
-                .row("orderdate", "date", "", "")
-                .row("orderpriority", "varchar(255)", "", "")
-                .row("clerk", "varchar(255)", "", "")
-                .row("shippriority", "integer", "", "")
-                .row("comment", "varchar(255)", "", "")
+        MaterializedResult expectedColumns = MaterializedResult.resultBuilder(getQueryRunner().getDefaultSession(), VARCHAR, VARCHAR, VARCHAR, VARCHAR, BIGINT, BIGINT, BIGINT)
+                .row("orderkey", "bigint", "", "", 19L, null, null)
+                .row("custkey", "bigint", "", "", 19L, null, null)
+                .row("orderstatus", "varchar(255)", "", "", null, null, 255L)
+                .row("totalprice", "double", "", "", 53L, null, null)
+                .row("orderdate", "date", "", "", null, null, null)
+                .row("orderpriority", "varchar(255)", "", "", null, null, 255L)
+                .row("clerk", "varchar(255)", "", "", null, null, 255L)
+                .row("shippriority", "integer", "", "", 10L, null, null)
+                .row("comment", "varchar(255)", "", "", null, null, 255L)
                 .build();
         assertEquals(actualColumns, expectedColumns);
     }
@@ -194,7 +197,10 @@ public class TestMySqlIntegrationMixedCaseTest
     private void execute(String sql)
             throws SQLException
     {
-        try (Connection connection = DriverManager.getConnection(mysqlServer.getJdbcUrl());
+        try (Connection connection = DriverManager.getConnection(
+                mysqlContainer.getJdbcUrl(),
+                mysqlContainer.getUsername(),
+                mysqlContainer.getPassword());
                 Statement statement = connection.createStatement()) {
             statement.execute(sql);
         }

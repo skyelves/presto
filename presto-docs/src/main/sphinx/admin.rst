@@ -13,6 +13,7 @@ Administration
     admin/spill
     admin/exchange-materialization
     admin/cte-materialization
+    admin/materialized-views
     admin/resource-groups
     admin/session-property-managers
     admin/function-namespace-managers
@@ -20,3 +21,4 @@ Administration
     admin/spark
     admin/verifier
     admin/grafana-cloud
+    admin/version-support

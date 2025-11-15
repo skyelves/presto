@@ -25,7 +25,7 @@ import com.datastax.driver.core.policies.RoundRobinPolicy;
 import com.datastax.driver.core.policies.TokenAwarePolicy;
 import com.datastax.driver.core.policies.WhiteListPolicy;
 import com.facebook.airlift.json.JsonCodec;
-import com.facebook.presto.cassandra.util.SslContextProvider;
+import com.facebook.presto.plugin.base.security.SslContextProvider;
 import com.google.inject.Binder;
 import com.google.inject.Module;
 import com.google.inject.Provides;
@@ -155,6 +155,6 @@ public class CassandraClientModule
                     contactPoints.forEach(clusterBuilder::addContactPoint);
                     return clusterBuilder.build();
                 }),
-                config.getNoHostAvailableRetryTimeout());
+                config.getNoHostAvailableRetryTimeout(), config.isCaseSensitiveNameMatchingEnabled());
     }
 }

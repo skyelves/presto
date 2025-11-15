@@ -11,28 +11,39 @@
 # limitations under the License.
 add_subdirectory(utils)
 
-add_executable(presto_flight_connector_infra_test
-               TestingArrowFlightServerTest.cpp)
+add_executable(presto_flight_connector_infra_test TestingArrowFlightServerTest.cpp)
 
 add_test(presto_flight_connector_infra_test presto_flight_connector_infra_test)
 
 target_link_libraries(
-  presto_flight_connector_infra_test presto_protocol
-  presto_flight_connector_test_lib GTest::gtest GTest::gtest_main ${GLOG})
+  presto_flight_connector_infra_test
+  presto_protocol
+  presto_flight_connector_test_lib
+  GTest::gtest
+  GTest::gtest_main
+  ${GLOG}
+)
 
 add_executable(
   presto_flight_connector_test
-  ArrowFlightConnectorTest.cpp ArrowFlightConnectorAuthTest.cpp
-  ArrowFlightConnectorTlsTest.cpp ArrowFlightConnectorDataTypeTest.cpp
-  ArrowFlightConfigTest.cpp)
-
-set(DATA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/data/tls_certs")
+  ArrowFlightConnectorTest.cpp
+  ArrowFlightConnectorAuthTest.cpp
+  ArrowFlightConnectorMTlsTest.cpp
+  ArrowFlightConnectorTlsTest.cpp
+  ArrowFlightConnectorDataTypeTest.cpp
+  ArrowFlightConfigTest.cpp
+)
 
 add_custom_target(
-  copy_flight_test_data ALL
-  COMMAND ${CMAKE_COMMAND} -E copy_directory ${DATA_DIR}
-          $<TARGET_FILE_DIR:presto_flight_connector_test>/data/tls_certs)
+  copy_flight_test_data
+  ALL
+  COMMAND
+    ${CMAKE_COMMAND} -E copy_directory_if_different "${CMAKE_CURRENT_SOURCE_DIR}/data"
+    "${CMAKE_CURRENT_BINARY_DIR}/data"
+  COMMENT "Copying test data files..."
+)
 
+add_dependencies(presto_flight_connector_test copy_flight_test_data)
 add_test(presto_flight_connector_test presto_flight_connector_test)
 
 target_link_libraries(
@@ -42,4 +53,5 @@ target_link_libraries(
   gtest
   gtest_main
   presto_flight_connector_test_lib
-  presto_protocol)
+  presto_protocol
+)

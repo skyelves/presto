@@ -194,6 +194,7 @@ public class PrestoSparkQueryExecutionFactory
     private final Set<PrestoSparkAuthenticatorProvider> authenticatorProviders;
     private final TempStorageManager tempStorageManager;
     private final String storageBasedBroadcastJoinStorage;
+    private final String nativeTempStorage;
     private final NodeMemoryConfig nodeMemoryConfig;
     private final FeaturesConfig featuresConfig;
     private final QueryManagerConfig queryManagerConfig;
@@ -274,6 +275,7 @@ public class PrestoSparkQueryExecutionFactory
         this.authenticatorProviders = ImmutableSet.copyOf(requireNonNull(authenticatorProviders, "authenticatorProviders is null"));
         this.tempStorageManager = requireNonNull(tempStorageManager, "tempStorageManager is null");
         this.storageBasedBroadcastJoinStorage = requireNonNull(prestoSparkConfig, "prestoSparkConfig is null").getStorageBasedBroadcastJoinStorage();
+        this.nativeTempStorage = requireNonNull(featuresConfig, "prestoSparkConfig is null").getSpillerTempStorage();
         this.nodeMemoryConfig = requireNonNull(nodeMemoryConfig, "nodeMemoryConfig is null");
         this.featuresConfig = requireNonNull(featuresConfig, "featuresConfig is null");
         this.queryManagerConfig = requireNonNull(queryManagerConfig, "queryManagerConfig is null");
@@ -368,7 +370,7 @@ public class PrestoSparkQueryExecutionFactory
                 ImmutableSet.of(),
                 Optional.empty(),
                 false,
-                planAndMore.flatMap(PlanAndMore::getUpdateType).orElse(null),
+                planAndMore.flatMap(PlanAndMore::getUpdateInfo).orElse(null),
                 rootStage,
                 failureInfo.orElse(null),
                 failureInfo.map(ExecutionFailureInfo::getErrorCode).orElse(null),
@@ -479,7 +481,7 @@ public class PrestoSparkQueryExecutionFactory
                 stats,
                 Optional.ofNullable(queryInfo.getFailureInfo()).map(PrestoSparkQueryExecutionFactory::toQueryError),
                 warningCollector.getWarnings(),
-                planAndMore.flatMap(PlanAndMore::getUpdateType),
+                planAndMore.flatMap(PlanAndMore::getUpdateInfo),
                 updateCount);
     }
 
@@ -609,7 +611,8 @@ public class PrestoSparkQueryExecutionFactory
         SessionContext sessionContext = PrestoSparkSessionContext.createFromSessionInfo(
                 prestoSparkSession,
                 credentialsProviders,
-                authenticatorProviders);
+                authenticatorProviders,
+                sql);
 
         SessionBuilder sessionBuilder = sessionSupplier.createSessionBuilder(queryId, sessionContext, warningCollectorFactory);
         sessionPropertyDefaults.applyDefaultProperties(sessionBuilder, Optional.empty(), Optional.empty());
@@ -679,10 +682,11 @@ public class PrestoSparkQueryExecutionFactory
                 planAndMore = queryPlanner.createQueryPlan(session, preparedQuery, warningCollector, variableAllocator, planNodeIdAllocator, sparkContext, sql);
                 JavaSparkContext javaSparkContext = new JavaSparkContext(sparkContext);
                 CollectionAccumulator<SerializedTaskInfo> taskInfoCollector = new CollectionAccumulator<>();
-                taskInfoCollector.register(sparkContext, Option.empty(), false);
+                taskInfoCollector.register(sparkContext, Option.empty(), true);
                 CollectionAccumulator<PrestoSparkShuffleStats> shuffleStatsCollector = new CollectionAccumulator<>();
                 shuffleStatsCollector.register(sparkContext, Option.empty(), false);
-                TempStorage tempStorage = tempStorageManager.getTempStorage(storageBasedBroadcastJoinStorage);
+                TempStorage broadcastJoinTempStorage = tempStorageManager.getTempStorage(this.storageBasedBroadcastJoinStorage);
+                TempStorage nativeTempStorage = tempStorageManager.getTempStorage(this.nativeTempStorage);
                 queryStateTimer.endAnalysis();
 
                 if (!isAdaptiveQueryExecutionEnabled(session)) {
@@ -712,7 +716,8 @@ public class PrestoSparkQueryExecutionFactory
                             metadataStorage,
                             queryStatusInfoOutputLocation,
                             queryDataOutputLocation,
-                            tempStorage,
+                            broadcastJoinTempStorage,
+                            nativeTempStorage,
                             nodeMemoryConfig,
                             featuresConfig,
                             queryManagerConfig,
@@ -751,7 +756,8 @@ public class PrestoSparkQueryExecutionFactory
                             metadataStorage,
                             queryStatusInfoOutputLocation,
                             queryDataOutputLocation,
-                            tempStorage,
+                            broadcastJoinTempStorage,
+                            nativeTempStorage,
                             nodeMemoryConfig,
                             featuresConfig,
                             queryManagerConfig,

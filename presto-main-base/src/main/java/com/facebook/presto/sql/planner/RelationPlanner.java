@@ -15,12 +15,14 @@ package com.facebook.presto.sql.planner;
 
 import com.facebook.presto.Session;
 import com.facebook.presto.SystemSessionProperties;
+import com.facebook.presto.common.QualifiedObjectName;
 import com.facebook.presto.common.predicate.TupleDomain;
 import com.facebook.presto.common.type.ArrayType;
 import com.facebook.presto.common.type.MapType;
 import com.facebook.presto.common.type.RowType;
 import com.facebook.presto.common.type.Type;
 import com.facebook.presto.metadata.Metadata;
+import com.facebook.presto.metadata.TableFunctionHandle;
 import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.TableHandle;
@@ -34,6 +36,7 @@ import com.facebook.presto.spi.plan.ExceptNode;
 import com.facebook.presto.spi.plan.FilterNode;
 import com.facebook.presto.spi.plan.IntersectNode;
 import com.facebook.presto.spi.plan.JoinNode;
+import com.facebook.presto.spi.plan.MaterializedViewScanNode;
 import com.facebook.presto.spi.plan.PlanNode;
 import com.facebook.presto.spi.plan.PlanNodeIdAllocator;
 import com.facebook.presto.spi.plan.ProjectNode;
@@ -50,11 +53,13 @@ import com.facebook.presto.sql.analyzer.Field;
 import com.facebook.presto.sql.analyzer.RelationId;
 import com.facebook.presto.sql.analyzer.RelationType;
 import com.facebook.presto.sql.analyzer.Scope;
+import com.facebook.presto.sql.analyzer.SemanticException;
 import com.facebook.presto.sql.parser.SqlParser;
 import com.facebook.presto.sql.planner.optimizations.JoinNodeUtils;
 import com.facebook.presto.sql.planner.optimizations.SampleNodeUtil;
 import com.facebook.presto.sql.planner.plan.LateralJoinNode;
 import com.facebook.presto.sql.planner.plan.SampleNode;
+import com.facebook.presto.sql.planner.plan.TableFunctionNode;
 import com.facebook.presto.sql.tree.AliasedRelation;
 import com.facebook.presto.sql.tree.Cast;
 import com.facebook.presto.sql.tree.CoalesceExpression;
@@ -84,6 +89,9 @@ import com.facebook.presto.sql.tree.SampledRelation;
 import com.facebook.presto.sql.tree.SetOperation;
 import com.facebook.presto.sql.tree.SymbolReference;
 import com.facebook.presto.sql.tree.Table;
+import com.facebook.presto.sql.tree.TableFunctionDescriptorArgument;
+import com.facebook.presto.sql.tree.TableFunctionInvocation;
+import com.facebook.presto.sql.tree.TableFunctionTableArgument;
 import com.facebook.presto.sql.tree.TableSubquery;
 import com.facebook.presto.sql.tree.Union;
 import com.facebook.presto.sql.tree.Unnest;
@@ -119,6 +127,7 @@ import static com.facebook.presto.sql.analyzer.ExpressionTreeUtils.getSourceLoca
 import static com.facebook.presto.sql.analyzer.ExpressionTreeUtils.isEqualComparisonExpression;
 import static com.facebook.presto.sql.analyzer.ExpressionTreeUtils.resolveEnumLiteral;
 import static com.facebook.presto.sql.analyzer.FeaturesConfig.CteMaterializationStrategy.NONE;
+import static com.facebook.presto.sql.analyzer.SemanticErrorCode.NOT_SUPPORTED;
 import static com.facebook.presto.sql.analyzer.SemanticExceptions.notSupportedException;
 import static com.facebook.presto.sql.planner.PlannerUtils.newVariable;
 import static com.facebook.presto.sql.planner.TranslateExpressionsUtil.toRowExpression;
@@ -175,6 +184,11 @@ class RelationPlanner
     @Override
     protected RelationPlan visitTable(Table node, SqlPlannerContext context)
     {
+        Optional<Analysis.MaterializedViewInfo> materializedViewInfo = analysis.getMaterializedViewInfo(node);
+        if (materializedViewInfo.isPresent()) {
+            return planMaterializedView(node, materializedViewInfo.get(), context);
+        }
+
         NamedQuery namedQuery = analysis.getNamedQuery(node);
         Scope scope = analysis.getScope(node);
 
@@ -295,6 +309,106 @@ class RelationPlanner
                 assignments.build()));
 
         return new RelationPlan(planBuilder.getRoot(), plan.getScope(), newMappings.build());
+    }
+
+    private RelationPlan planMaterializedView(Table node, Analysis.MaterializedViewInfo materializedViewInfo, SqlPlannerContext context)
+    {
+        RelationPlan dataTablePlan = process(materializedViewInfo.getDataTable(), context);
+        RelationPlan viewQueryPlan = process(materializedViewInfo.getViewQuery(), context);
+
+        Scope scope = analysis.getScope(node);
+
+        QualifiedObjectName materializedViewName = materializedViewInfo.getMaterializedViewName();
+
+        RelationType dataTableDescriptor = dataTablePlan.getDescriptor();
+        List<VariableReferenceExpression> dataTableVariables = dataTablePlan.getFieldMappings();
+        List<VariableReferenceExpression> viewQueryVariables = viewQueryPlan.getFieldMappings();
+
+        checkArgument(
+                dataTableDescriptor.getVisibleFieldCount() == viewQueryVariables.size(),
+                "Materialized view %s has mismatched field counts: data table has %s visible fields but view query has %s fields",
+                materializedViewName,
+                dataTableDescriptor.getVisibleFieldCount(),
+                viewQueryVariables.size());
+
+        ImmutableList.Builder<VariableReferenceExpression> outputVariablesBuilder = ImmutableList.builder();
+        ImmutableMap.Builder<VariableReferenceExpression, VariableReferenceExpression> dataTableMappingsBuilder = ImmutableMap.builder();
+        ImmutableMap.Builder<VariableReferenceExpression, VariableReferenceExpression> viewQueryMappingsBuilder = ImmutableMap.builder();
+
+        for (Field field : dataTableDescriptor.getVisibleFields()) {
+            int fieldIndex = dataTableDescriptor.indexOf(field);
+            VariableReferenceExpression dataTableVar = dataTableVariables.get(fieldIndex);
+            VariableReferenceExpression viewQueryVar = viewQueryVariables.get(fieldIndex);
+
+            VariableReferenceExpression outputVar = variableAllocator.newVariable(dataTableVar);
+            outputVariablesBuilder.add(outputVar);
+
+            dataTableMappingsBuilder.put(outputVar, dataTableVar);
+            viewQueryMappingsBuilder.put(outputVar, viewQueryVar);
+        }
+
+        List<VariableReferenceExpression> outputVariables = outputVariablesBuilder.build();
+        Map<VariableReferenceExpression, VariableReferenceExpression> dataTableMappings = dataTableMappingsBuilder.build();
+        Map<VariableReferenceExpression, VariableReferenceExpression> viewQueryMappings = viewQueryMappingsBuilder.build();
+
+        MaterializedViewScanNode mvScanNode = new MaterializedViewScanNode(
+                getSourceLocation(node.getLocation()),
+                idAllocator.getNextId(),
+                dataTablePlan.getRoot(),
+                viewQueryPlan.getRoot(),
+                materializedViewName,
+                dataTableMappings,
+                viewQueryMappings,
+                outputVariables);
+
+        return new RelationPlan(mvScanNode, scope, outputVariables);
+    }
+
+    @Override
+    protected RelationPlan visitTableFunctionInvocation(TableFunctionInvocation node, SqlPlannerContext context)
+    {
+        node.getArguments().stream()
+                .forEach(argument -> {
+                    if (argument.getValue() instanceof TableFunctionTableArgument) {
+                        throw new SemanticException(NOT_SUPPORTED, argument, "Table arguments are not yet supported for table functions");
+                    }
+                    if (argument.getValue() instanceof TableFunctionDescriptorArgument) {
+                        throw new SemanticException(NOT_SUPPORTED, argument, "Descriptor arguments are not yet supported for table functions");
+                    }
+                });
+        Analysis.TableFunctionInvocationAnalysis functionAnalysis = analysis.getTableFunctionAnalysis(node);
+
+        // TODO handle input relations:
+        // 1. extract the input relations from node.getArguments() and plan them. Apply relation coercions if requested.
+        // 2. for each input relation, prepare the TableArgumentProperties record, consisting of:
+        //  - row or set semantics (from the actualArgument)
+        //  - prune when empty property  (from the actualArgument)
+        //  - pass through columns property (from the actualArgument)
+        //  - optional Specification: ordering scheme and partitioning (from the node's argument) <- planned upon the source's RelationPlan (or combined RelationPlan from all sources)
+        // TODO add - argument name
+        // TODO add - mapping column name => Symbol // TODO mind the fields without names and duplicate field names in RelationType
+        List<RelationPlan> sources = ImmutableList.of();
+        List<TableFunctionNode.TableArgumentProperties> inputRelationsProperties = ImmutableList.of();
+
+        Scope scope = analysis.getScope(node);
+
+        ImmutableList.Builder<VariableReferenceExpression> outputVariablesBuilder = ImmutableList.builder();
+        for (Field field : scope.getRelationType().getAllFields()) {
+            VariableReferenceExpression variable = variableAllocator.newVariable(getSourceLocation(node), field.getName().get(), field.getType());
+            outputVariablesBuilder.add(variable);
+        }
+
+        List<VariableReferenceExpression> outputVariables = outputVariablesBuilder.build();
+        PlanNode root = new TableFunctionNode(
+                idAllocator.getNextId(),
+                functionAnalysis.getFunctionName(),
+                functionAnalysis.getArguments(),
+                outputVariablesBuilder.build(),
+                sources.stream().map(RelationPlan::getRoot).collect(toImmutableList()),
+                inputRelationsProperties,
+                new TableFunctionHandle(functionAnalysis.getConnectorId(), functionAnalysis.getConnectorTableFunctionHandle(), functionAnalysis.getTransactionHandle()));
+
+        return new RelationPlan(root, scope, outputVariables);
     }
 
     @Override

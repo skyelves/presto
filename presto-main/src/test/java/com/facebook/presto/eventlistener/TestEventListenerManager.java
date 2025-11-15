@@ -20,11 +20,15 @@ import com.facebook.presto.common.RuntimeStats;
 import com.facebook.presto.common.plan.PlanCanonicalizationStrategy;
 import com.facebook.presto.common.resourceGroups.QueryType;
 import com.facebook.presto.spi.PrestoWarning;
+import com.facebook.presto.spi.SchemaTableName;
+import com.facebook.presto.spi.analyzer.UpdateInfo;
+import com.facebook.presto.spi.connector.ConnectorCommitHandle;
 import com.facebook.presto.spi.eventlistener.CTEInformation;
 import com.facebook.presto.spi.eventlistener.Column;
 import com.facebook.presto.spi.eventlistener.EventListener;
 import com.facebook.presto.spi.eventlistener.EventListenerFactory;
 import com.facebook.presto.spi.eventlistener.OperatorStatistics;
+import com.facebook.presto.spi.eventlistener.OutputColumnMetadata;
 import com.facebook.presto.spi.eventlistener.PlanOptimizerInformation;
 import com.facebook.presto.spi.eventlistener.QueryCompletedEvent;
 import com.facebook.presto.spi.eventlistener.QueryContext;
@@ -185,7 +189,7 @@ public class TestEventListenerManager
         Optional<PrestoSparkExecutionContext> prestoSparkExecutionContext = Optional.empty();
         Map<PlanCanonicalizationStrategy, String> hboPlanHash = new HashMap<>();
         Optional<Map<PlanNodeId, PlanNode>> planIdNodeMap = Optional.ofNullable(new HashMap<>());
-
+        UpdateInfo updateInfo = new UpdateInfo("dummy-type", "dummy-object");
         return new QueryCompletedEvent(
                 metadata,
                 statistics,
@@ -213,7 +217,8 @@ public class TestEventListenerManager
                 windowFunctions,
                 prestoSparkExecutionContext,
                 hboPlanHash,
-                planIdNodeMap);
+                planIdNodeMap,
+                Optional.of(updateInfo.getUpdateObject()));
     }
 
     public static QueryStatistics createDummyQueryStatistics()
@@ -221,6 +226,7 @@ public class TestEventListenerManager
         Duration cpuTime = Duration.ofMillis(1000);
         Duration retriedCpuTime = Duration.ofMillis(500);
         Duration wallTime = Duration.ofMillis(2000);
+        Duration totalScheduledTime = Duration.ofMillis(2500);
         Duration waitingForPrerequisitesTime = Duration.ofMillis(300);
         Duration queuedTime = Duration.ofMillis(1500);
         Duration waitingForResourcesTime = Duration.ofMillis(600);
@@ -256,6 +262,7 @@ public class TestEventListenerManager
                 cpuTime,
                 retriedCpuTime,
                 wallTime,
+                totalScheduledTime,
                 waitingForPrerequisitesTime,
                 queuedTime,
                 waitingForResourcesTime,
@@ -374,18 +381,21 @@ public class TestEventListenerManager
         List<QueryInputMetadata> inputs = new ArrayList<>();
         QueryInputMetadata queryInputMetadata = getQueryInputMetadata();
         inputs.add(queryInputMetadata);
-        Column column1 = new Column("column1", "int");
-        Column column2 = new Column("column2", "varchar");
-        Column column3 = new Column("column3", "varchar");
-        List<Column> columns = Arrays.asList(column1, column2, column3);
+        OutputColumnMetadata column1 = new OutputColumnMetadata("column1", "int", new HashSet<>());
+        OutputColumnMetadata column2 = new OutputColumnMetadata("column2", "varchar", new HashSet<>());
+        OutputColumnMetadata column3 = new OutputColumnMetadata("column3", "varchar", new HashSet<>());
+        List<OutputColumnMetadata> columns = new ArrayList<>();
+        columns.add(column1);
+        columns.add(column2);
+        columns.add(column3);
         QueryOutputMetadata outputMetadata = new QueryOutputMetadata(
                 "dummyCatalog",
                 "dummySchema",
                 "dummyTable",
                 Optional.of("dummyConnectorMetadata"),
                 Optional.of(true),
-                "dummySerializedCommitOutput",
-                Optional.of(columns));
+                Optional.of(columns),
+                Optional.of(new TestCommitHandle("", "dummySerializedCommitOutput")));
         return new QueryIOMetadata(inputs, Optional.of(outputMetadata));
     }
 
@@ -407,7 +417,7 @@ public class TestEventListenerManager
                 columns,
                 connectorInfo,
                 Optional.empty(),
-                serializedCommitOutput);
+                Optional.of(new TestCommitHandle(serializedCommitOutput, "")));
     }
 
     private static SplitCompletedEvent createDummySplitCompletedEvent()
@@ -464,6 +474,31 @@ public class TestEventListenerManager
         }
         catch (IOException e) {
             log.error(e, "Could not delete file found at [%s]", path);
+        }
+    }
+
+    private static class TestCommitHandle
+            implements ConnectorCommitHandle
+    {
+        private final String readOutput;
+        private final String writeOutput;
+
+        public TestCommitHandle(String readOutput, String writeOutput)
+        {
+            this.readOutput = requireNonNull(readOutput, "readOutput is null");
+            this.writeOutput = requireNonNull(writeOutput, "writeOutput is null");
+        }
+
+        @Override
+        public String getSerializedCommitOutputForRead(SchemaTableName table)
+        {
+            return readOutput;
+        }
+
+        @Override
+        public String getSerializedCommitOutputForWrite(SchemaTableName table)
+        {
+            return writeOutput;
         }
     }
 

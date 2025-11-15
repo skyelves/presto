@@ -27,6 +27,7 @@ import com.facebook.presto.spi.plan.JoinNode;
 import com.facebook.presto.spi.plan.JoinType;
 import com.facebook.presto.spi.plan.LimitNode;
 import com.facebook.presto.spi.plan.MarkDistinctNode;
+import com.facebook.presto.spi.plan.MaterializedViewScanNode;
 import com.facebook.presto.spi.plan.OutputNode;
 import com.facebook.presto.spi.plan.PlanNode;
 import com.facebook.presto.spi.plan.ProjectNode;
@@ -134,6 +135,11 @@ public class Patterns
         return typeOf(MarkDistinctNode.class);
     }
 
+    public static Pattern<MaterializedViewScanNode> materializedViewScan()
+    {
+        return typeOf(MaterializedViewScanNode.class);
+    }
+
     public static Pattern<OutputNode> output()
     {
         return typeOf(OutputNode.class);
@@ -227,6 +233,11 @@ public class Patterns
     public static Pattern<WindowNode> window()
     {
         return typeOf(WindowNode.class);
+    }
+
+    public static Pattern<TableFunctionNode> tableFunction()
+    {
+        return typeOf(TableFunctionNode.class);
     }
 
     public static Pattern<RowNumberNode> rowNumber()

@@ -14,23 +14,26 @@
 add_library(
   presto_operators
   PartitionAndSerialize.cpp
+  ShuffleExchangeSource.cpp
   ShuffleRead.cpp
   ShuffleWrite.cpp
-  UnsafeRowExchangeSource.cpp
-  LocalPersistentShuffle.cpp
+  LocalShuffle.cpp
   BroadcastWrite.cpp
-  BroadcastFactory.cpp
+  BroadcastFile.cpp
   BroadcastExchangeSource.cpp
-  BinarySortableSerializer.cpp)
+  BinarySortableSerializer.cpp
+)
 
 target_link_libraries(
   presto_operators
   presto_common
+  presto_native-cpp2
   velox_core
   velox_exec
   velox_presto_serializer
   velox_vector
-  velox_row_fast)
+  velox_row_fast
+)
 
 if(PRESTO_ENABLE_TESTING)
   add_subdirectory(tests)

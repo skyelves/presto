@@ -19,11 +19,13 @@ import com.facebook.presto.metadata.Metadata;
 import com.facebook.presto.metadata.MetadataManager;
 import com.facebook.presto.spi.WarningCollector;
 import com.facebook.presto.spi.analyzer.AnalyzerProvider;
+import com.facebook.presto.spi.analyzer.UpdateInfo;
 import com.facebook.presto.spi.security.AccessControl;
 import com.facebook.presto.sql.analyzer.BuiltInQueryPreparer;
 import com.facebook.presto.sql.tree.Expression;
 import com.facebook.presto.sql.tree.Statement;
 import com.facebook.presto.transaction.TransactionManager;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.util.concurrent.ListenableFuture;
 import jakarta.inject.Inject;
 
@@ -61,6 +63,8 @@ public class SessionDefinitionExecution<T extends Statement>
     @Override
     protected ListenableFuture<?> executeTask()
     {
+        accessControl.checkQueryIntegrity(stateMachine.getSession().getIdentity(), stateMachine.getSession().getAccessControlContext(), query, ImmutableMap.of(), ImmutableMap.of());
+
         return task.execute(statement, transactionManager, metadata, accessControl, stateMachine, parameters, query);
     }
 
@@ -115,7 +119,7 @@ public class SessionDefinitionExecution<T extends Statement>
             SessionTransactionControlTask<T> task = (SessionTransactionControlTask<T>) tasks.get(statement.getClass());
             checkArgument(task != null, "no task for statement: %s", statement.getClass().getSimpleName());
 
-            stateMachine.setUpdateType(task.getName());
+            stateMachine.setUpdateInfo(new UpdateInfo(task.getName(), ""));
             return new SessionDefinitionExecution<>(task, statement, slug, retryCount, transactionManager, metadata, accessControl, stateMachine, parameters, query);
         }
     }

@@ -451,6 +451,7 @@ public class SqlQueryScheduler
                             .flatMap(schedule -> schedule.getStagesToSchedule().stream())
                             .collect(toImmutableList());
 
+                    boolean allBlocked = true;
                     for (StageExecutionAndScheduler stageExecutionAndScheduler : executionsToSchedule) {
                         long startCpuNanos = THREAD_MX_BEAN.getCurrentThreadCpuTime();
                         long startWallNanos = System.nanoTime();
@@ -476,6 +477,9 @@ public class SqlQueryScheduler
                         }
                         else if (!result.getBlocked().isDone()) {
                             blockedStages.add(result.getBlocked());
+                        }
+                        else {
+                            allBlocked = false;
                         }
                         stageExecutionAndScheduler.getStageLinkage()
                                 .processScheduleResults(stageExecution.getState(), result.getNewTasks());
@@ -535,13 +539,13 @@ public class SqlQueryScheduler
                     }
 
                     // wait for a state change and then schedule again
-                    if (!blockedStages.isEmpty()) {
+                    if (allBlocked && !blockedStages.isEmpty()) {
                         try (TimeStat.BlockTimer timer = schedulerStats.getSleepTime().time()) {
                             tryGetFutureValue(whenAnyComplete(blockedStages), 1, SECONDS);
                         }
-                        for (ListenableFuture<?> blockedStage : blockedStages) {
-                            blockedStage.cancel(true);
-                        }
+                    }
+                    for (ListenableFuture<?> blockedStage : blockedStages) {
+                        blockedStage.cancel(true);
                     }
                 }
             }
@@ -665,6 +669,7 @@ public class SqlQueryScheduler
                             fragment.getPartitioning(),
                             scheduleOrder(newRoot),
                             fragment.getPartitioningScheme(),
+                            fragment.getOutputOrderingScheme(),
                             fragment.getStageExecutionDescriptor(),
                             fragment.isOutputTableWriterFragment(),
                             estimatedStatsAndCosts,

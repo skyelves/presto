@@ -14,13 +14,16 @@
 package com.facebook.presto.execution;
 
 import com.facebook.airlift.json.JsonCodec;
+import com.facebook.presto.common.QualifiedObjectName;
+import com.facebook.presto.common.SourceColumn;
 import com.facebook.presto.spi.ConnectorId;
+import com.facebook.presto.spi.eventlistener.OutputColumnMetadata;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import org.testng.annotations.Test;
 
 import java.util.Optional;
 
-import static com.facebook.presto.spi.connector.ConnectorCommitHandle.EMPTY_COMMIT_OUTPUT;
 import static org.testng.Assert.assertEquals;
 
 public class TestOutput
@@ -34,10 +37,13 @@ public class TestOutput
                 new ConnectorId("connectorId"),
                 "schema",
                 "table",
-                EMPTY_COMMIT_OUTPUT,
                 Optional.of(
                         ImmutableList.of(
-                                new Column("column", "type"))));
+                                new OutputColumnMetadata(
+                                        "column", "type",
+                                        ImmutableSet.of(
+                                                new SourceColumn(QualifiedObjectName.valueOf("catalog.schema.table"), "column"))))),
+                Optional.empty());
 
         String json = codec.toJson(expected);
         Output actual = codec.fromJson(json);

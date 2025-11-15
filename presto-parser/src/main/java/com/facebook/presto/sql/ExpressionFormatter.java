@@ -33,6 +33,7 @@ import com.facebook.presto.sql.tree.CurrentUser;
 import com.facebook.presto.sql.tree.DecimalLiteral;
 import com.facebook.presto.sql.tree.DereferenceExpression;
 import com.facebook.presto.sql.tree.DoubleLiteral;
+import com.facebook.presto.sql.tree.EnumLiteral;
 import com.facebook.presto.sql.tree.ExistsPredicate;
 import com.facebook.presto.sql.tree.Expression;
 import com.facebook.presto.sql.tree.Extract;
@@ -196,6 +197,12 @@ public final class ExpressionFormatter
         protected String visitBooleanLiteral(BooleanLiteral node, Void context)
         {
             return String.valueOf(node.getValue());
+        }
+
+        @Override
+        protected String visitEnumLiteral(EnumLiteral node, Void context)
+        {
+            return node.getType() + ": " + node.getValue();
         }
 
         @Override
@@ -703,7 +710,7 @@ public final class ExpressionFormatter
     static String formatStringLiteral(String s)
     {
         s = s.replace("'", "''");
-        if (CharMatcher.inRange((char) 0x20, (char) 0x7E).matchesAllOf(s)) {
+        if (CharMatcher.inRange((char) 0x20, (char) 0x7E).or(CharMatcher.anyOf("\n\r\t")).matchesAllOf(s)) {
             return "'" + s + "'";
         }
 
@@ -713,7 +720,7 @@ public final class ExpressionFormatter
         while (iterator.hasNext()) {
             int codePoint = iterator.nextInt();
             checkArgument(codePoint >= 0, "Invalid UTF-8 encoding in characters: %s", s);
-            if (isAsciiPrintable(codePoint)) {
+            if (isAsciiPrintable(codePoint) || isWhitespace(codePoint)) {
                 char ch = (char) codePoint;
                 if (ch == '\\') {
                     builder.append(ch);
@@ -788,6 +795,11 @@ public final class ExpressionFormatter
             return false;
         }
         return true;
+    }
+
+    private static boolean isWhitespace(int codePoint)
+    {
+        return codePoint == '\n' || codePoint == '\r' || codePoint == '\t';
     }
 
     private static String formatGroupingSet(List<Expression> groupingSet, Optional<List<Expression>> parameters)

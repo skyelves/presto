@@ -93,6 +93,9 @@ import com.facebook.presto.sql.tree.Lateral;
 import com.facebook.presto.sql.tree.LikeClause;
 import com.facebook.presto.sql.tree.LogicalBinaryExpression;
 import com.facebook.presto.sql.tree.LongLiteral;
+import com.facebook.presto.sql.tree.Merge;
+import com.facebook.presto.sql.tree.MergeInsert;
+import com.facebook.presto.sql.tree.MergeUpdate;
 import com.facebook.presto.sql.tree.NaturalJoin;
 import com.facebook.presto.sql.tree.Node;
 import com.facebook.presto.sql.tree.NodeLocation;
@@ -178,7 +181,12 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import static com.facebook.presto.spi.security.ViewSecurity.DEFINER;
+import static com.facebook.presto.spi.security.ViewSecurity.INVOKER;
+import static com.facebook.presto.sql.QueryUtil.aliased;
+import static com.facebook.presto.sql.QueryUtil.equal;
 import static com.facebook.presto.sql.QueryUtil.identifier;
+import static com.facebook.presto.sql.QueryUtil.nameReference;
 import static com.facebook.presto.sql.QueryUtil.query;
 import static com.facebook.presto.sql.QueryUtil.quotedIdentifier;
 import static com.facebook.presto.sql.QueryUtil.row;
@@ -1563,13 +1571,21 @@ public class TestSqlParser
         assertStatement(
                 "REFRESH MATERIALIZED VIEW a WHERE p = 'x'",
                 new RefreshMaterializedView(
-                        table(QualifiedName.of("a")),
-                        new ComparisonExpression(ComparisonExpression.Operator.EQUAL, new Identifier("p"), new StringLiteral("x"))));
+                        table(QualifiedName.of("a")), Optional.of(
+                            new ComparisonExpression(ComparisonExpression.Operator.EQUAL,
+                                    new Identifier("p"),
+                                    new StringLiteral("x")))));
         assertStatement(
                 "REFRESH MATERIALIZED VIEW a.b WHERE p = 'x'",
                 new RefreshMaterializedView(
-                        table(QualifiedName.of("a", "b")),
-                        new ComparisonExpression(ComparisonExpression.Operator.EQUAL, new Identifier("p"), new StringLiteral("x"))));
+                        table(QualifiedName.of("a", "b")), Optional.of(
+                            new ComparisonExpression(ComparisonExpression.Operator.EQUAL,
+                                    new Identifier("p"),
+                                    new StringLiteral("x")))));
+
+        assertStatement(
+                "REFRESH MATERIALIZED VIEW mv",
+                new RefreshMaterializedView(table(QualifiedName.of("mv")), Optional.empty()));
     }
 
     @Test
@@ -1642,6 +1658,41 @@ public class TestSqlParser
                         ImmutableList.of(
                                 new UpdateAssignment(new Identifier("bar"), new LongLiteral("23"))),
                         Optional.empty()));
+    }
+
+    @Test
+    public void testMerge()
+    {
+        NodeLocation location = new NodeLocation(1, 1);
+        assertStatement("" +
+                        "MERGE INTO product_sales AS s\n" +
+                        "  USING monthly_sales AS ms\n" +
+                        "  ON s.product_id = ms.product_id\n" +
+                        "WHEN MATCHED THEN\n" +
+                        "  UPDATE SET\n" +
+                        "      sales = sales + ms.sales\n" +
+                        "    , last_sale = ms.sale_date\n" +
+                        "    , current_price = ms.price\n" +
+                        "WHEN NOT MATCHED THEN\n" +
+                        "  INSERT (product_id, sales, last_sale, current_price)\n" +
+                        "  VALUES (ms.product_id, ms.sales, ms.sale_date, ms.price)",
+                new Merge(
+                        location,
+                        new AliasedRelation(location, table(QualifiedName.of("product_sales")), new Identifier("s"), null),
+                        aliased(table(QualifiedName.of("monthly_sales")), "ms"),
+                        equal(nameReference("s", "product_id"), nameReference("ms", "product_id")),
+                        ImmutableList.of(
+                                new MergeUpdate(
+                                        ImmutableList.of(
+                                                new MergeUpdate.Assignment(new Identifier("sales"), new ArithmeticBinaryExpression(
+                                                        ArithmeticBinaryExpression.Operator.ADD, nameReference("sales"), nameReference("ms", "sales"))),
+                                                new MergeUpdate.Assignment(new Identifier("last_sale"), nameReference("ms", "sale_date")),
+                                                new MergeUpdate.Assignment(new Identifier("current_price"), nameReference("ms", "price")))),
+                                new MergeInsert(
+                                        ImmutableList.of(new Identifier("product_id"), new Identifier("sales"), new Identifier("last_sale"),
+                                                new Identifier("current_price")),
+                                        ImmutableList.of(nameReference("ms", "product_id"), nameReference("ms", "sales"),
+                                                nameReference("ms", "sale_date"), nameReference("ms", "price"))))));
     }
 
     @Test
@@ -1732,8 +1783,8 @@ public class TestSqlParser
         assertStatement("CREATE VIEW a AS SELECT * FROM t", new CreateView(QualifiedName.of("a"), query, false, Optional.empty()));
         assertStatement("CREATE OR REPLACE VIEW a AS SELECT * FROM t", new CreateView(QualifiedName.of("a"), query, true, Optional.empty()));
 
-        assertStatement("CREATE VIEW a SECURITY DEFINER AS SELECT * FROM t", new CreateView(QualifiedName.of("a"), query, false, Optional.of(CreateView.Security.DEFINER)));
-        assertStatement("CREATE VIEW a SECURITY INVOKER AS SELECT * FROM t", new CreateView(QualifiedName.of("a"), query, false, Optional.of(CreateView.Security.INVOKER)));
+        assertStatement("CREATE VIEW a SECURITY DEFINER AS SELECT * FROM t", new CreateView(QualifiedName.of("a"), query, false, Optional.of(DEFINER)));
+        assertStatement("CREATE VIEW a SECURITY INVOKER AS SELECT * FROM t", new CreateView(QualifiedName.of("a"), query, false, Optional.of(INVOKER)));
 
         assertStatement("CREATE VIEW bar.foo AS SELECT * FROM t", new CreateView(QualifiedName.of("bar", "foo"), query, false, Optional.empty()));
         assertStatement("CREATE VIEW \"awesome view\" AS SELECT * FROM t", new CreateView(QualifiedName.of("awesome view"), query, false, Optional.empty()));
@@ -1775,6 +1826,11 @@ public class TestSqlParser
                         " WITH (partitioned_by = ARRAY ['ds'], retention_days = 90)" +
                         " AS SELECT * FROM t",
                 new CreateMaterializedView(Optional.empty(), QualifiedName.of("mv"), query, true, properties1, Optional.of("A simple materialized view")));
+
+        assertStatement("CREATE MATERIALIZED VIEW mv SECURITY DEFINER AS SELECT * FROM t",
+                new CreateMaterializedView(QualifiedName.of("mv"), query, false, Optional.of(DEFINER), ImmutableList.of(), Optional.empty()));
+        assertStatement("CREATE MATERIALIZED VIEW mv SECURITY INVOKER AS SELECT * FROM t",
+                new CreateMaterializedView(QualifiedName.of("mv"), query, false, Optional.of(INVOKER), ImmutableList.of(), Optional.empty()));
     }
 
     @Test
@@ -3671,5 +3727,63 @@ public class TestSqlParser
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty());
+    }
+
+    @Test
+    public void testCopartitionInTableArgumentAlias()
+    {
+        // table argument 'input' is aliased. The alias "copartition" is illegal in this context.
+
+        assertInvalidStatement(
+                "SELECT * FROM TABLE(some_ptf(input => TABLE(orders) copartition(a, b, c)))",
+                "The word \"COPARTITION\" is ambiguous in this context\\. To alias an argument, precede the alias with \"AS\"\\. To specify co-partitioning, change the argument order so that the last argument cannot be aliased\\.");
+
+        // table argument 'input' contains an aliased relation with the alias "copartition". The alias is enclosed in the 'TABLE(...)' clause, and the argument itself is not aliased.
+        // The alias "copartition" is legal in this context.
+        assertTrue(SQL_PARSER.createStatement(
+                "SELECT * " +
+                        "FROM TABLE(some_ptf( " +
+                        "                   input => TABLE(SELECT * FROM orders copartition(a, b, c))))"
+        ) instanceof Query);
+
+        // table argument 'input' is aliased. The alias "COPARTITION" is delimited, so it can cause no ambiguity with the COPARTITION clause, and is considered legal in this context.
+        assertTrue(SQL_PARSER.createStatement(
+                "SELECT * " +
+                        "FROM TABLE(some_ptf( " +
+                        "input => TABLE(orders) \"COPARTITION\"(a, b, c)))"
+        ) instanceof Query);
+
+        // table argument 'input' is aliased. The alias "copartition" is preceded with the keyword "AS", so it can cause no ambiguity with the COPARTITION clause, and is considered legal in this context.
+        assertTrue(SQL_PARSER.createStatement(
+                "SELECT * " +
+                        "FROM TABLE(some_ptf( " +
+                        "input => TABLE(orders) AS copartition(a, b, c)))"
+        ) instanceof Query);
+
+        // the COPARTITION word can be either the alias for argument 'input3', or part of the COPARTITION clause.
+        // It is parsed as the argument alias, and then fails as illegal in this context.
+        assertInvalidStatement(
+                "SELECT * " +
+                        "FROM TABLE(some_ptf( " +
+                        "input1 => TABLE(customers) PARTITION BY nationkey, " +
+                        "input2 => TABLE(nation) PARTITION BY nationkey, " +
+                        "input3 => TABLE(lineitem) " +
+                        "COPARTITION(customers, nation)))",
+                "The word \"COPARTITION\" is ambiguous in this context\\. " +
+                        "To alias an argument, precede the alias with \"AS\"\\. " +
+                        "To specify co-partitioning, change the argument order so that the last argument cannot be aliased\\.");
+
+        // the above query does not fail if we change the order of arguments so that the last argument before the COPARTITION clause has specified partitioning.
+        // In such case, the COPARTITION word cannot be mistaken for alias.
+        // Note that this transformation of the query is always available. If the table function invocation contains the COPARTITION clause,
+        // at least two table arguments must have partitioning specified.
+        assertTrue(SQL_PARSER.createStatement(
+                "SELECT * " +
+                        "FROM TABLE(some_ptf( " +
+                        "input1 => TABLE(customers) PARTITION BY nationkey, " +
+                        "input3 => TABLE(lineitem), " +
+                        "input2 => TABLE(nation) PARTITION BY nationkey " +
+                        "COPARTITION(customers, nation))) "
+        ) instanceof Query);
     }
 }

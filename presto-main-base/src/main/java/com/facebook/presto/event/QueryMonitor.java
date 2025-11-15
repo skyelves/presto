@@ -48,8 +48,10 @@ import com.facebook.presto.server.BasicQueryInfo;
 import com.facebook.presto.server.BasicQueryStats;
 import com.facebook.presto.spi.ConnectorId;
 import com.facebook.presto.spi.QueryId;
+import com.facebook.presto.spi.analyzer.UpdateInfo;
 import com.facebook.presto.spi.eventlistener.Column;
 import com.facebook.presto.spi.eventlistener.OperatorStatistics;
+import com.facebook.presto.spi.eventlistener.OutputColumnMetadata;
 import com.facebook.presto.spi.eventlistener.QueryCompletedEvent;
 import com.facebook.presto.spi.eventlistener.QueryContext;
 import com.facebook.presto.spi.eventlistener.QueryCreatedEvent;
@@ -222,6 +224,7 @@ public class QueryMonitor
                         ofMillis(0),
                         ofMillis(0),
                         ofMillis(0),
+                        ofMillis(0),
                         ofMillis(queryInfo.getQueryStats().getWaitingForPrerequisitesTime().toMillis()),
                         ofMillis(queryInfo.getQueryStats().getQueuedTime().toMillis()),
                         ofMillis(0),
@@ -276,6 +279,7 @@ public class QueryMonitor
                 ImmutableSet.of(),
                 Optional.empty(),
                 ImmutableMap.of(),
+                Optional.empty(),
                 Optional.empty()));
 
         logQueryTimeline(queryInfo);
@@ -319,7 +323,8 @@ public class QueryMonitor
                         queryInfo.getWindowFunctions(),
                         queryInfo.getPrestoSparkExecutionContext(),
                         getPlanHash(queryInfo.getPlanCanonicalInfo(), historyBasedPlanStatisticsTracker.getStatsEquivalentPlanRootNode(queryInfo.getQueryId())),
-                        Optional.of(queryInfo.getPlanIdNodeMap())));
+                        Optional.of(queryInfo.getPlanIdNodeMap()),
+                        Optional.ofNullable(queryInfo.getUpdateInfo()).map(UpdateInfo::getUpdateObject)));
 
         logQueryTimeline(queryInfo);
     }
@@ -362,7 +367,7 @@ public class QueryMonitor
                         .map(stageId -> String.valueOf(stageId.getId()))
                         .collect(toImmutableList()),
                 queryInfo.getSession().getTraceToken(),
-                Optional.ofNullable(queryInfo.getUpdateType()));
+                Optional.ofNullable(queryInfo.getUpdateInfo()).map(UpdateInfo::getUpdateType));
     }
 
     private List<OperatorStatistics> createOperatorStatistics(QueryInfo queryInfo)
@@ -430,6 +435,7 @@ public class QueryMonitor
                 ofMillis(queryStats.getTotalCpuTime().toMillis()),
                 ofMillis(queryStats.getRetriedCpuTime().toMillis()),
                 ofMillis(queryStats.getElapsedTime().toMillis()),
+                ofMillis(queryStats.getTotalScheduledTime().toMillis()),
                 ofMillis(queryStats.getWaitingForPrerequisitesTime().toMillis()),
                 ofMillis(queryStats.getQueuedTime().toMillis()),
                 ofMillis(queryStats.getResourceWaitingTime().toMillis()),
@@ -470,6 +476,7 @@ public class QueryMonitor
                 ofMillis(queryStats.getTotalCpuTime().toMillis()),
                 ofMillis(0),
                 ofMillis(queryStats.getElapsedTime().toMillis()),
+                ofMillis(queryStats.getTotalScheduledTime().toMillis()),
                 ofMillis(queryStats.getWaitingForPrerequisitesTime().toMillis()),
                 ofMillis(queryStats.getQueuedTime().toMillis()),
                 ofMillis(0),
@@ -589,7 +596,7 @@ public class QueryMonitor
                             .collect(Collectors.toList()),
                     input.getConnectorInfo(),
                     input.getStatistics(),
-                    input.getSerializedCommitOutput()));
+                    input.getCommitOutput()));
         }
 
         Optional<QueryOutputMetadata> output = Optional.empty();
@@ -600,11 +607,12 @@ public class QueryMonitor
                     .map(TableFinishInfo.class::cast)
                     .findFirst();
 
-            Optional<List<Column>> outputColumns = queryInfo.getOutput().get().getColumns()
+            Optional<List<OutputColumnMetadata>> outputColumnsMetadata = queryInfo.getOutput().get().getColumns()
                     .map(columns -> columns.stream()
-                            .map(column -> new Column(
-                                    column.getName(),
-                                    column.getType()))
+                            .map(column -> new OutputColumnMetadata(
+                                    column.getColumnName(),
+                                    column.getColumnType(),
+                                    column.getSourceColumns()))
                             .collect(toImmutableList()));
 
             output = Optional.of(
@@ -614,8 +622,8 @@ public class QueryMonitor
                             queryInfo.getOutput().get().getTable(),
                             tableFinishInfo.map(TableFinishInfo::getSerializedConnectorOutputMetadata),
                             tableFinishInfo.map(TableFinishInfo::isJsonLengthLimitExceeded),
-                            queryInfo.getOutput().get().getSerializedCommitOutput(),
-                            outputColumns));
+                            outputColumnsMetadata,
+                            queryInfo.getOutput().get().getCommitOutput()));
         }
 
         return new QueryIOMetadata(inputs.build(), output);

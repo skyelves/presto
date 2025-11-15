@@ -58,6 +58,7 @@ import com.facebook.presto.spark.classloader_interface.PrestoSparkSession;
 import com.facebook.presto.spark.classloader_interface.PrestoSparkTaskExecutorFactoryProvider;
 import com.facebook.presto.spark.execution.AbstractPrestoSparkQueryExecution;
 import com.facebook.presto.spark.execution.nativeprocess.NativeExecutionModule;
+import com.facebook.presto.spark.execution.property.NativeExecutionConfigModule;
 import com.facebook.presto.spi.NodeManager;
 import com.facebook.presto.spi.Plugin;
 import com.facebook.presto.spi.WarningCollector;
@@ -247,7 +248,9 @@ public class PrestoSparkQueryRunner
                         .build(),
                 ImmutableMap.of(),
                 dataDirectory,
-                ImmutableList.of(new NativeExecutionModule()),
+                ImmutableList.of(new NativeExecutionModule(),
+                        new NativeExecutionConfigModule(ImmutableMap.of(), ImmutableMap.of("hive",
+                                ImmutableMap.of("connector.name", "hive")))),
                 DEFAULT_AVAILABLE_CPU_COUNT);
         ExtendedHiveMetastore metastore = queryRunner.getMetastore();
         if (!metastore.getDatabase(METASTORE_CONTEXT, "tpch").isPresent()) {
@@ -593,6 +596,8 @@ public class PrestoSparkQueryRunner
                         ImmutableSet.of(),
                         p.getUpdateType(),
                         getOnlyElement(getOnlyElement(rows).getFields()) == null ? OptionalLong.empty() : OptionalLong.of((Long) getOnlyElement(getOnlyElement(rows).getFields())),
+                        Optional.empty(),
+                        false,
                         ImmutableList.of());
             }
         }
@@ -605,6 +610,8 @@ public class PrestoSparkQueryRunner
                     ImmutableSet.of(),
                     Optional.empty(),
                     OptionalLong.empty(),
+                    Optional.empty(),
+                    false,
                     ImmutableList.of());
         }
         else {
@@ -615,6 +622,8 @@ public class PrestoSparkQueryRunner
                     ImmutableSet.of(),
                     Optional.empty(),
                     OptionalLong.empty(),
+                    Optional.empty(),
+                    false,
                     ImmutableList.of());
         }
     }

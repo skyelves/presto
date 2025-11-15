@@ -115,6 +115,11 @@ public abstract class PlanVisitor<R, C>
         return visitPlan(node, context);
     }
 
+    public R visitIndexJoin(IndexJoinNode node, C context)
+    {
+        return visitPlan(node, context);
+    }
+
     public R visitSemiJoin(SemiJoinNode node, C context)
     {
         return visitPlan(node, context);
@@ -156,6 +161,11 @@ public abstract class PlanVisitor<R, C>
     }
 
     public R visitMetadataDelete(MetadataDeleteNode node, C context)
+    {
+        return visitPlan(node, context);
+    }
+
+    public R visitMaterializedViewScan(MaterializedViewScanNode node, C context)
     {
         return visitPlan(node, context);
     }
